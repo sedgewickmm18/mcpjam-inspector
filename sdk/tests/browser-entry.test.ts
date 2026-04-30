@@ -36,7 +36,7 @@ describe("browser entrypoint", () => {
     expect((merged as Record<string, unknown>).extensions).toEqual({});
   });
 
-  it("does not inject elicitation when normalizing client capabilities", () => {
+  it("always includes elicitation capability when normalizing client capabilities", () => {
     expect(
       browser.normalizeClientCapabilities({
         experimental: {
@@ -44,6 +44,7 @@ describe("browser entrypoint", () => {
         },
       } as any)
     ).toEqual({
+      elicitation: {},
       experimental: {
         inspectorProfile: true,
       },

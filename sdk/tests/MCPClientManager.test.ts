@@ -712,7 +712,9 @@ describe("MCPClientManager", () => {
           inspectorProfile: {},
         },
       });
-      expect(info!.clientCapabilities).not.toHaveProperty("elicitation");
+      // Elicitation capability is always included so handlers can be registered
+      // at any time (required by MCP SDK v2 Client's assertRequestHandlerCapability)
+      expect(info!.clientCapabilities).toHaveProperty("elicitation");
 
       const extensions = (info!.clientCapabilities as Record<string, unknown>)
         .extensions as Record<string, unknown>;
@@ -754,7 +756,9 @@ describe("MCPClientManager", () => {
             inspectorProfile: {},
           },
         });
-        expect(info!.clientCapabilities).not.toHaveProperty("elicitation");
+        // Elicitation capability is always included so handlers can be registered
+        // at any time (required by MCP SDK v2 Client's assertRequestHandlerCapability)
+        expect(info!.clientCapabilities).toHaveProperty("elicitation");
         expect(
           (
             (info!.clientCapabilities as Record<string, unknown>).extensions as
@@ -826,7 +830,7 @@ describe("MCPClientManager", () => {
       await manager.disconnectServer("elicitation-enabled-test");
     }, 30000);
 
-    it("should keep exact clientCapabilities free of elicitation when not explicitly configured", async () => {
+    it("should include elicitation in exact clientCapabilities when handlers are registered", async () => {
       manager.setElicitationCallback(() => ({ action: "cancel" } as any));
 
       await manager.connectToServer("exact-caps-no-elicitation-test", {
@@ -848,7 +852,8 @@ describe("MCPClientManager", () => {
           exactPath: {},
         },
       });
-      expect(info!.clientCapabilities).not.toHaveProperty("elicitation");
+      // Elicitation is included because a handler callback was registered before connection
+      expect(info!.clientCapabilities).toHaveProperty("elicitation");
 
       await manager.disconnectServer("exact-caps-no-elicitation-test");
     }, 30000);
@@ -861,7 +866,8 @@ describe("MCPClientManager", () => {
 
       const before = manager.getInitializationInfo("late-elicitation-test");
       expect(before).toBeDefined();
-      expect(before!.clientCapabilities).not.toHaveProperty("elicitation");
+      // Elicitation capability is always included so handlers can be registered later
+      expect(before!.clientCapabilities).toHaveProperty("elicitation");
 
       expect(() =>
         manager.setElicitationCallback(() => ({ action: "cancel" } as any))
@@ -869,7 +875,7 @@ describe("MCPClientManager", () => {
 
       const after = manager.getInitializationInfo("late-elicitation-test");
       expect(after).toBeDefined();
-      expect(after!.clientCapabilities).not.toHaveProperty("elicitation");
+      expect(after!.clientCapabilities).toHaveProperty("elicitation");
 
       await manager.disconnectServer("late-elicitation-test");
     }, 30000);

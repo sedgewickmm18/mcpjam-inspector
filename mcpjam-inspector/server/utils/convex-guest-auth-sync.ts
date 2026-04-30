@@ -128,6 +128,13 @@ export function startGuestAuthProvisioningInBackground(): void {
     return;
   }
 
+  // Skip Convex provisioning entirely when running in SQLite mode
+  if (!process.env.CONVEX_HTTP_URL) {
+    provisioningStarted = true;
+    logger.info("[guest-auth] Skipping Convex provisioning (SQLite mode)");
+    return;
+  }
+
   provisioningStarted = true;
   void provisionGuestAuthConfigToConvex().catch((error) => {
     provisioningStarted = false;

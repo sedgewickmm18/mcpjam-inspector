@@ -57,6 +57,7 @@ npx @mcpjam/inspector@latest
   - [SDK](#sdk)
   - [CI/CD](#cicd)
 - [Contributing](#contributing-)
+  - [Local Development](#local-development)
 - [Links](#links-)
 - [Community](#community-)
 - [Shoutouts](#shoutouts-)
@@ -186,6 +187,42 @@ Wire MCPJam into GitHub Actions, GitLab CI, or your CI system of choice to run c
 We're grateful for you considering contributing to MCPJam. Please read our [contributing guide](CONTRIBUTING.md).
 
 Join our [Discord community](https://discord.gg/JEnDtz8X6z) where the contributors hang out at.
+
+## Local Development
+
+After cloning the repo, install dependencies and use the dev launcher script:
+
+```bash
+npm install --legacy-peer-deps
+```
+
+### `mcpjam-dev.sh` — Smart build-if-stale launcher
+
+The script automatically detects which components (SDK, CLI, Inspector) are stale and rebuilds only what's needed before launching.
+
+**Start the web-based Inspector** (equivalent to `npx @mcpjam/inspector@latest` but with your local fixes):
+
+```bash
+./mcpjam-dev.sh inspector                              # starts on port 6274
+./mcpjam-dev.sh inspector --no-open                    # don't open browser
+./mcpjam-dev.sh inspector --port 8080                  # custom port
+./mcpjam-dev.sh inspector --config mcp-config.json     # auto-connect to servers
+./mcpjam-dev.sh inspector -- npx @modelcontextprotocol/server-everything
+```
+
+**Run the mcpjam CLI:**
+
+```bash
+./mcpjam-dev.sh server probe -- npx @modelcontextprotocol/server-everything
+./mcpjam-dev.sh tools list
+./mcpjam-dev.sh --help
+```
+
+**How it works:**
+
+1. Compares source file timestamps against `dist/` outputs for each component
+2. Rebuilds only stale components in dependency order (SDK → CLI or Inspector)
+3. Launches the requested tool with all forwarded arguments
 
 # Links 🔗
 

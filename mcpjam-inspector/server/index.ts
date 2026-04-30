@@ -100,6 +100,7 @@ function logBox(content: string, title?: string) {
 import mcpRoutes from "./routes/mcp/index";
 import appsRoutes from "./routes/apps/index";
 import webRoutes from "./routes/web/index";
+import v2Routes from "./routes/api/v2/index";
 import { rpcLogBus } from "./services/rpc-log-bus";
 import { tunnelManager } from "./services/tunnel-manager";
 import {
@@ -110,6 +111,7 @@ import {
 } from "./config";
 import "./types/hono"; // Type extensions
 import { initXAAIdpKeyPair } from "./services/xaa-idp-keypair";
+import { initializeSqlite, shutdownSqlite, isSqliteMode } from "./db";
 
 // Utility function to extract MCP server config from environment variables
 function getMCPConfigFromEnv() {
@@ -211,6 +213,13 @@ generateSessionToken();
 initXAAIdpKeyPair();
 
 startGuestAuthProvisioningInBackground();
+
+// Initialize SQLite database if in local mode (no Convex)
+if (initializeSqlite()) {
+  appLogger.info("📦 Running in local persistence mode (SQLite)");
+} else {
+  appLogger.info("☁️ Running in cloud persistence mode (Convex)");
+}
 const app = new Hono().onError((err, c) => {
   appLogger.error("Unhandled error:", err);
 
@@ -348,6 +357,7 @@ if (!HOSTED_MODE) {
   );
 }
 app.route("/api/web", webRoutes);
+app.route("/api/v2", v2Routes);
 
 // Fallback for clients that post to "/sse/message" instead of the rewritten proxy messages URL.
 // We resolve the upstream messages endpoint via sessionId and forward with any injected auth.
@@ -515,6 +525,7 @@ const server = serve({
 // Handle graceful shutdown
 async function shutdown() {
   console.log("\n🛑 Shutting down gracefully...");
+  shutdownSqlite();
   await tunnelManager.closeAll();
   server.close();
   await appLogger.flush();

@@ -52,9 +52,19 @@ export function getDefaultClientCapabilities(): ClientCapabilityOptions {
 export function normalizeClientCapabilities(
   capabilities?: ClientCapabilityOptions
 ): ClientCapabilityOptions {
-  return {
+  const normalized: ClientCapabilityOptions = {
     ...(capabilities ?? {}),
   };
+
+  // Always include elicitation capability so that handlers can be registered
+  // at any time (before or after connection). The MCP SDK v2 Client throws
+  // SdkError(CapabilityNotSupported) in setRequestHandler if the capability
+  // is not declared during construction.
+  if (!normalized.elicitation) {
+    normalized.elicitation = {};
+  }
+
+  return normalized;
 }
 
 /**
@@ -111,5 +121,5 @@ export function mergeClientCapabilities(
     }
   }
 
-  return merged as ClientCapabilityOptions;
+  return normalizeClientCapabilities(merged as ClientCapabilityOptions);
 }

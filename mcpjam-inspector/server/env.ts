@@ -15,6 +15,7 @@ export interface LoadedInspectorEnv {
 export interface InspectorClientRuntimeConfig {
   convexUrl?: string;
   convexSiteUrl?: string;
+  persistenceMode: "convex" | "sqlite";
 }
 
 function getInspectorEnvMode(): InspectorEnvMode {
@@ -73,7 +74,12 @@ export function loadInspectorEnv(serverDir: string): LoadedInspectorEnv {
     loadedFiles.push(envPath);
   }
 
-  if (!process.env.CONVEX_HTTP_URL) {
+  // CONVEX_HTTP_URL is optional when running in SQLite mode
+  const isSqliteMode =
+    process.env.PERSISTENCE_MODE === "sqlite" ||
+    (!process.env.CONVEX_URL && !process.env.VITE_CONVEX_URL);
+
+  if (!process.env.CONVEX_HTTP_URL && !isSqliteMode) {
     throw new Error(
       `CONVEX_HTTP_URL is required but not set. Loaded from: ${loadedFiles.join(", ") || "(none)"}`,
     );
@@ -117,6 +123,10 @@ function replaceConvexHostnameSuffix(
 }
 
 export function getInspectorClientRuntimeConfig(): InspectorClientRuntimeConfig {
+  const isSqlite =
+    process.env.PERSISTENCE_MODE === "sqlite" ||
+    (!process.env.CONVEX_URL && !process.env.VITE_CONVEX_URL);
+
   const convexSiteUrl =
     normalizeUrlOrigin(process.env.CONVEX_HTTP_URL) ??
     replaceConvexHostnameSuffix(
@@ -133,17 +143,14 @@ export function getInspectorClientRuntimeConfig(): InspectorClientRuntimeConfig 
     ) ?? normalizeUrlOrigin(process.env.VITE_CONVEX_URL);
 
   return {
-    convexUrl,
-    convexSiteUrl,
+    convexUrl: isSqlite ? undefined : convexUrl,
+    convexSiteUrl: isSqlite ? undefined : convexSiteUrl,
+    persistenceMode: isSqlite ? "sqlite" : "convex",
   };
 }
 
-export function getInspectorClientRuntimeConfigScript(): string | null {
+export function getInspectorClientRuntimeConfigScript(): string {
   const runtimeConfig = getInspectorClientRuntimeConfig();
-  if (!runtimeConfig.convexUrl && !runtimeConfig.convexSiteUrl) {
-    return null;
-  }
-
   const serializedConfig = JSON.stringify(runtimeConfig).replace(
     /</g,
     "\\u003c",

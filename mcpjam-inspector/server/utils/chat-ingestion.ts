@@ -3,6 +3,8 @@ import { logger } from "./logger";
 import { getRequestLogger } from "./request-logger";
 import type { EvalTraceSpan } from "@/shared/eval-trace";
 import type { LiveChatTraceUsage } from "@/shared/live-chat-trace";
+import { isSqliteMode } from "../db/connection";
+import { getRow, updateRow, insertRow } from "../db/crud";
 
 const DEFAULT_INGEST_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_PREVIEW_CHARS = 200;
@@ -262,5 +264,72 @@ export async function persistChatSessionToConvex(
     }
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Unified chat session persistence dispatcher.
+ *
+ * When running in SQLite mode (no Convex backend), writes directly to the
+ * local SQLite database. Otherwise delegates to the Convex HTTP endpoint.
+ */
+export async function persistChatSession(
+  options: PersistChatSessionOptions,
+  c?: Context,
+): Promise<void> {
+  if (isSqliteMode()) {
+    return persistChatSessionToSqliteInternal(options);
+  }
+  return persistChatSessionToConvex(options, c);
+}
+
+/**
+ * Internal SQLite persistence implementation.
+ * Writes chat session data directly to the local SQLite database.
+ */
+async function persistChatSessionToSqliteInternal(
+  options: PersistChatSessionOptions,
+): Promise<void> {
+  try {
+    const existing = getRow<{ id: string; messages: string }>(
+      "chat_sessions",
+      options.chatSessionId,
+    );
+
+    const messages = options.sessionMessages ?? [];
+    const messagesJson = JSON.stringify(messages);
+
+    if (existing) {
+      const updates: Record<string, unknown> = {
+        messages: messagesJson,
+        model: options.modelId,
+      };
+      if (options.systemPrompt !== undefined) {
+        updates.system_prompt = options.systemPrompt;
+      }
+      if (options.workspaceId !== undefined) {
+        updates.workspace_id = options.workspaceId;
+      }
+      updateRow("chat_sessions", options.chatSessionId, updates);
+    } else {
+      insertRow("chat_sessions", {
+        id: options.chatSessionId,
+        title: `Chat ${new Date().toLocaleString()}`,
+        messages: messagesJson,
+        model: options.modelId,
+        system_prompt: options.systemPrompt || null,
+        server_id: options.serverId || null,
+        workspace_id: options.workspaceId || "default",
+        topic_map: null,
+      });
+    }
+
+    logger.info(
+      `[chat-session-sqlite] Persisted session ${options.chatSessionId} (${messages.length} messages)`,
+    );
+  } catch (error) {
+    logger.warn("[chat-session-sqlite] Error persisting chat session", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
