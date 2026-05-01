@@ -1,3 +1,4 @@
+
 import { ProviderTokens } from "@/hooks/use-ai-provider-keys";
 import {
   SUPPORTED_MODELS,
@@ -7,6 +8,8 @@ import {
   Model,
 } from "@/shared/types";
 import type { CustomProvider } from "@mcpjam/sdk/browser";
+
+const DEFAULT_MODEL_STORAGE_KEY = "mcp-inspector-default-model";
 
 export function parseModelAliases(
   aliasString: string,
@@ -81,9 +84,31 @@ export function buildAvailableModels(params: {
   return models;
 }
 
+/**
+ * Get the default model from localStorage if configured, otherwise fall back to priority list
+ */
 export const getDefaultModel = (
   availableModels: ModelDefinition[],
 ): ModelDefinition => {
+  // First check if user has configured a default model in localStorage
+  try {
+    if (typeof window !== "undefined") {
+      const storedDefaultModelId = localStorage.getItem(DEFAULT_MODEL_STORAGE_KEY);
+      if (storedDefaultModelId) {
+        const found = availableModels.find((m) => String(m.id) === storedDefaultModelId);
+        if (found) {
+          console.log("[model-helpers] Using configured default model:", storedDefaultModelId);
+          return found;
+        }
+        // If stored model is not available, clear it
+        localStorage.removeItem(DEFAULT_MODEL_STORAGE_KEY);
+      }
+    }
+  } catch (err) {
+    console.warn("[model-helpers] Failed to read default model from localStorage:", err);
+  }
+
+  // Fall back to priority list
   const modelIdsByPriority: Array<Model | string> = [
     "anthropic/claude-haiku-4.5",
     "openai/gpt-5-mini",
@@ -101,3 +126,45 @@ export const getDefaultModel = (
   }
   return availableModels[0];
 };
+
+/**
+ * Set the default model preference in localStorage
+ */
+export function setDefaultModel(modelId: string): void {
+  try {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(DEFAULT_MODEL_STORAGE_KEY, modelId);
+      console.log("[model-helpers] Set default model:", modelId);
+    }
+  } catch (err) {
+    console.warn("[model-helpers] Failed to set default model in localStorage:", err);
+  }
+}
+
+/**
+ * Clear the default model preference from localStorage
+ */
+export function clearDefaultModel(): void {
+  try {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(DEFAULT_MODEL_STORAGE_KEY);
+      console.log("[model-helpers] Cleared default model");
+    }
+  } catch (err) {
+    console.warn("[model-helpers] Failed to clear default model from localStorage:", err);
+  }
+}
+
+/**
+ * Get the currently configured default model ID from localStorage
+ */
+export function getConfiguredDefaultModelId(): string | null {
+  try {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(DEFAULT_MODEL_STORAGE_KEY);
+    }
+  } catch (err) {
+    console.warn("[model-helpers] Failed to read default model from localStorage:", err);
+  }
+  return null;
+}

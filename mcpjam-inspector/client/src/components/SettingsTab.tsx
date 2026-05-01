@@ -1,3 +1,4 @@
+
 import { useAiProviderKeys } from "@/hooks/use-ai-provider-keys";
 import { useCustomProviders } from "@/hooks/use-custom-providers";
 import { useState } from "react";
@@ -15,6 +16,14 @@ import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 import { updateThemeMode } from "@/lib/theme-utils";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { HOSTED_MODE } from "@/lib/config";
+import {
+  setDefaultModel as setDefaultModelHelper,
+  clearDefaultModel,
+  getConfiguredDefaultModelId,
+  getDefaultModel,
+  buildAvailableModels,
+} from "@/components/chat-v2/shared/model-helpers";
+import type { ModelDefinition } from "@/shared/types";
 
 import type { CustomProvider } from "@mcpjam/sdk/browser";
 
@@ -172,6 +181,20 @@ export function SettingsTab() {
     },
   ];
 
+  // Build available models for default model selector
+  const availableModels = buildAvailableModels({
+    hasToken,
+    getOpenRouterSelectedModels,
+    isOllamaRunning: false, // Ollama models not shown in settings
+    ollamaModels: [],
+    getAzureBaseUrl,
+    customProviders,
+  });
+
+  const [selectedDefaultModelId, setSelectedDefaultModelId] = useState<string | null>(() => {
+    return getConfiguredDefaultModelId();
+  });
+
   const handleEdit = (providerId: string) => {
     const provider = providerConfigs.find((p) => p.id === providerId);
     if (provider) {
@@ -257,6 +280,16 @@ export function SettingsTab() {
     setEditingCustomProviderIndex(null);
   };
 
+  const handleDefaultModelChange = (modelId: string) => {
+    setSelectedDefaultModelId(modelId);
+    setDefaultModelHelper(modelId);
+  };
+
+  const handleClearDefaultModel = () => {
+    setSelectedDefaultModelId(null);
+    clearDefaultModel();
+  };
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-10 space-y-8 max-w-3xl">
@@ -284,6 +317,38 @@ export function SettingsTab() {
               </div>
             }
           />
+        </SettingsSection>
+
+        {/* Default Model */}
+        <SettingsSection title="Default Model">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Choose the default model to use when starting a new chat. This overrides the system default.
+            </p>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedDefaultModelId || ""}
+                onChange={(e) => handleDefaultModelChange(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border rounded-md bg-background"
+              >
+                <option value="">System Default</option>
+                {availableModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+              {selectedDefaultModelId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClearDefaultModel}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              )}
+            </div>
+          </div>
         </SettingsSection>
 
         {!HOSTED_MODE && (

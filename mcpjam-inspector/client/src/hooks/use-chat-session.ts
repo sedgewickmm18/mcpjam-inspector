@@ -256,6 +256,10 @@ export interface UseChatSessionReturn {
 
 const GUEST_LOCKED_MODEL_REASON = "Sign in to use MCPJam provided models";
 
+// localStorage keys for chat settings that survive tab switches
+const SYSTEM_PROMPT_STORAGE_KEY = "mcp-inspector-system-prompt";
+const TEMPERATURE_STORAGE_KEY = "mcp-inspector-temperature";
+
 function inferModelProviderFromId(modelId: string): ModelProvider {
   const providerPrefix = modelId.split("/")[0];
 
@@ -945,8 +949,61 @@ export function useChatSession({
   >(undefined);
   const [isSessionBootstrapComplete, setIsSessionBootstrapComplete] =
     useState(false);
-  const [systemPrompt, setSystemPrompt] = useState(initialSystemPrompt);
-  const [temperature, setTemperature] = useState(initialTemperature);
+  // Read system prompt and temperature from localStorage synchronously so they
+  // survive tab switches (ChatTabV2 unmounts when you navigate away).
+  const [systemPrompt, setSystemPromptState] = useState(() => {
+    if (typeof window === "undefined") return initialSystemPrompt;
+    try {
+      const stored = localStorage.getItem(SYSTEM_PROMPT_STORAGE_KEY);
+      return stored !== null ? stored : initialSystemPrompt;
+    } catch {
+      return initialSystemPrompt;
+    }
+  });
+  const [temperature, setTemperatureState] = useState(() => {
+    if (typeof window === "undefined") return initialTemperature;
+    try {
+      const stored = localStorage.getItem(TEMPERATURE_STORAGE_KEY);
+      if (stored !== null) {
+        const parsed = parseFloat(stored);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return initialTemperature;
+  });
+
+  // Track whether this is the first render so the sync-from-props effects
+  // below don't overwrite the values we just restored from localStorage.
+  const isFirstRenderRef = useRef(true);
+
+  // Persist systemPrompt / temperature to localStorage on change
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(SYSTEM_PROMPT_STORAGE_KEY, systemPrompt);
+    } catch {
+      // ignore
+    }
+  }, [systemPrompt]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(TEMPERATURE_STORAGE_KEY, String(temperature));
+    } catch {
+      // ignore
+    }
+  }, [temperature]);
+
+  // Wrappers that persist + set state
+  const setSystemPrompt = useCallback((prompt: string) => {
+    setSystemPromptState(prompt);
+  }, []);
+  const setTemperature = useCallback((temp: number) => {
+    setTemperatureState(temp);
+  }, []);
   const [chatSessionId, setChatSessionId] = useState(generateId());
   const chatSessionIdRef = useRef(chatSessionId);
   chatSessionIdRef.current = chatSessionId;
@@ -1147,24 +1204,74 @@ export function useChatSession({
       );
     };
 
+    console.log("[useChatSession] selectedModel resolution:", {
+      initialModelId,
+      selectedModelId,
+      availableModelsCount: availableModels.length,
+      selectableModelsCount: selectableModels.length,
+      fallback: fallback.id,
+    });
+
     if (initialModelId) {
-      return (
-        resolveAvailableModel(initialModelId) ??
-        createLockedInitialModel(initialModelId)
-      );
+      const resolved = resolveAvailableModel(initialModelId) ?? createLockedInitialModel(initialModelId);
+      console.log("[useChatSession] Using initialModelId:", initialModelId, "resolved to:", resolved?.id);
+      return resolved;
     }
-    if (!selectedModelId) return fallback;
-    return resolveSelectableModel(selectedModelId) ?? fallback;
+    if (!selectedModelId) {
+      console.log("[useChatSession] No selectedModelId, using fallback:", fallback.id);
+      return fallback;
+    }
+    const resolved = resolveSelectableModel(selectedModelId);
+    const result = resolved ?? fallback;
+    console.log("[useChatSession] selectedModelId:", selectedModelId, "resolved to:", resolved?.id, "or fallback:", fallback.id, "final:", result.id);
+    return result;
   }, [availableModels, initialModelId, selectableModels, selectedModelId]);
+
+  // Track when we're in a temporary fallback state to prevent overwriting localStorage
+  // This happens during tab remount when custom providers/Ollama haven't loaded yet
+  const isUsingTemporaryFallback = useMemo(() => {
+    if (initialModelId) return false;
+    if (!selectedModelId) return false;
+    const resolved = availableModels.find(
+      (model) => String(model.id) === selectedModelId && !model.disabled
+    );
+    return !resolved && selectedModelId !== null;
+  }, [initialModelId, selectedModelId, availableModels]);
 
   const setSelectedModel = useCallback(
     (model: ModelDefinition) => {
+      console.log("[useChatSession] setSelectedModel called:", model.id, "initialModelId:", initialModelId, "isUsingTemporaryFallback:", isUsingTemporaryFallback, "stack:", new Error().stack);
       if (initialModelId) {
+        console.log("[useChatSession] setSelectedModel blocked by initialModelId");
+        return;
+      }
+      // Don't overwrite localStorage if we're using a temporary fallback
+      // This prevents the race condition where the fallback model clobbers the user's custom model
+      if (isUsingTemporaryFallback) {
+        console.log("[useChatSession] setSelectedModel blocked - using temporary fallback, preserving persisted model:", selectedModelId);
         return;
       }
       setSelectedModelId(String(model.id));
     },
-    [initialModelId, setSelectedModelId]
+    [initialModelId, isUsingTemporaryFallback, selectedModelId, setSelectedModelId]
+  );
+
+  const guardedSetSelectedModelIds = useCallback(
+    (modelIds: string[]) => {
+      console.log("[useChatSession] guardedSetSelectedModelIds called:", modelIds, "initialModelId:", initialModelId, "isUsingTemporaryFallback:", isUsingTemporaryFallback, "stack:", new Error().stack);
+      if (initialModelId) {
+        console.log("[useChatSession] guardedSetSelectedModelIds blocked by initialModelId");
+        return;
+      }
+      // Don't overwrite localStorage if we're using a temporary fallback
+      // This prevents the race condition where ChatTabV2's sync effects clobber the user's custom model
+      if (isUsingTemporaryFallback) {
+        console.log("[useChatSession] guardedSetSelectedModelIds blocked - using temporary fallback, preserving persisted model:", selectedModelId);
+        return;
+      }
+      setSelectedModelIds(modelIds);
+    },
+    [initialModelId, isUsingTemporaryFallback, selectedModelId, setSelectedModelIds]
   );
 
   const isMcpJamModel = useMemo(() => {
@@ -1705,11 +1812,22 @@ export function useChatSession({
     [queueSessionHydration]
   );
 
+  // Sync from props — but skip the first render so we don't overwrite the
+  // values we just restored from localStorage above.
   useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      return;
+    }
     setSystemPrompt(initialSystemPrompt);
   }, [initialSystemPrompt]);
 
   useEffect(() => {
+    if (isFirstRenderRef.current) {
+      // Already set to false by the systemPrompt effect above (both run on
+      // the same render cycle, but only one needs to flip the flag).
+      return;
+    }
     setTemperature(initialTemperature);
   }, [initialTemperature]);
 
@@ -2050,7 +2168,7 @@ export function useChatSession({
     selectedModel,
     setSelectedModel,
     selectedModelIds,
-    setSelectedModelIds,
+    setSelectedModelIds: guardedSetSelectedModelIds,
     multiModelEnabled,
     setMultiModelEnabled,
     availableModels,
