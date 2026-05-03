@@ -129,18 +129,22 @@ const config: ForgeConfig = {
     new MakerDeb({
       options: {
         maintainer: "MCPJam",
+        name: "mcpjam-inspector",
         homepage: "https://mcpjam.com",
         description:
           "MCPJam Inspector - Explore and interact with Model Context Protocol servers",
         categories: ["Development"],
+        bin: "mcpjam-inspector",
       },
     }),
     new MakerRpm({
       options: {
+        name: "mcpjam-inspector",
         homepage: "https://mcpjam.com",
         description:
           "MCPJam Inspector - Explore and interact with Model Context Protocol servers",
         categories: ["Development"],
+        bin: "mcpjam-inspector",
       },
     }),
   ],
