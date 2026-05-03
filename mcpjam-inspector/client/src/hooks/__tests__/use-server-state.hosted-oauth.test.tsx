@@ -85,14 +85,14 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("../useWorkspaces", () => ({
+vi.mock("../useProjects", () => ({
   useServerMutations: mockUseServerMutations,
 }));
 
 function renderHostedServerState(
   dispatch = vi.fn(),
   options?: {
-    workspaceClientConfig?: {
+    projectClientConfig?: {
       version: 1;
       clientCapabilities: Record<string, unknown>;
       hostContext: Record<string, unknown>;
@@ -102,12 +102,12 @@ function renderHostedServerState(
   return renderHook(() =>
     useServerState({
       appState: {
-        activeWorkspaceId: "ws_1",
-        workspaces: {
+        activeProjectId: "ws_1",
+        projects: {
           ws_1: {
             id: "ws_1",
-            name: "Workspace",
-            clientConfig: options?.workspaceClientConfig,
+            name: "Project",
+            clientConfig: options?.projectClientConfig,
             servers: {
               asana: {
                 name: "asana",
@@ -147,14 +147,15 @@ function renderHostedServerState(
       dispatch,
       isLoading: false,
       isAuthenticated: true,
+      hasSignedInUser: true,
       isAuthLoading: false,
-      isLoadingWorkspaces: false,
+      isLoadingProjects: false,
       useLocalFallback: false,
-      effectiveWorkspaces: {
+      effectiveProjects: {
         ws_1: {
           id: "ws_1",
-          name: "Workspace",
-          clientConfig: options?.workspaceClientConfig,
+          name: "Project",
+          clientConfig: options?.projectClientConfig,
           servers: {
             asana: {
               name: "asana",
@@ -173,8 +174,8 @@ function renderHostedServerState(
           updatedAt: new Date(),
         },
       } as any,
-      effectiveActiveWorkspaceId: "ws_1",
-      activeWorkspaceServersFlat: [{ _id: "srv_asana", name: "asana" }],
+      effectiveActiveProjectId: "ws_1",
+      activeProjectServersFlat: [{ _id: "srv_asana", name: "asana" }],
       logger: {
         info: vi.fn(),
         warn: vi.fn(),
@@ -229,12 +230,13 @@ describe("useServerState hosted OAuth callback guards", () => {
         dispatch: vi.fn(),
         isLoading: false,
         isAuthenticated: true,
+        hasSignedInUser: true,
         isAuthLoading: false,
-        isLoadingWorkspaces: false,
+        isLoadingProjects: false,
         useLocalFallback: false,
-        effectiveWorkspaces: {} as any,
-        effectiveActiveWorkspaceId: "ws_1",
-        activeWorkspaceServersFlat: [],
+        effectiveProjects: {} as any,
+        effectiveActiveProjectId: "ws_1",
+        activeProjectServersFlat: [],
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -250,14 +252,14 @@ describe("useServerState hosted OAuth callback guards", () => {
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it("completes hosted workspace OAuth callbacks through the backend path", async () => {
+  it("completes hosted project OAuth callbacks through the backend path", async () => {
     writeHostedOAuthPendingMarker({
-      surface: "workspace",
-      workspaceId: "ws_1",
+      surface: "project",
+      projectId: "ws_1",
       serverId: "srv_asana",
       serverName: "asana",
       serverUrl: "https://mcp.asana.com/sse",
-      accessScope: "workspace_member",
+      accessScope: "project_member",
       returnHash: "#servers",
     });
     localStorage.setItem("mcp-oauth-pending", "asana");
@@ -282,12 +284,13 @@ describe("useServerState hosted OAuth callback guards", () => {
         dispatch,
         isLoading: false,
         isAuthenticated: true,
+        hasSignedInUser: true,
         isAuthLoading: false,
-        isLoadingWorkspaces: false,
+        isLoadingProjects: false,
         useLocalFallback: false,
-        effectiveWorkspaces: {} as any,
-        effectiveActiveWorkspaceId: "ws_1",
-        activeWorkspaceServersFlat: [],
+        effectiveProjects: {} as any,
+        effectiveActiveProjectId: "ws_1",
+        activeProjectServersFlat: [],
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -300,8 +303,8 @@ describe("useServerState hosted OAuth callback guards", () => {
     await waitFor(() => {
       expect(mockHandleOAuthCallback).toHaveBeenCalledWith(
         expect.objectContaining({
-          surface: "workspace",
-          workspaceId: "ws_1",
+          surface: "project",
+          projectId: "ws_1",
           serverId: "srv_asana",
           serverName: "asana",
         }),
@@ -331,12 +334,12 @@ describe("useServerState hosted OAuth callback guards", () => {
       "/?code=oauth-code&state=expected-state-token",
     );
     writeHostedOAuthPendingMarker({
-      surface: "workspace",
-      workspaceId: "ws_1",
+      surface: "project",
+      projectId: "ws_1",
       serverId: "srv_asana",
       serverName: "asana",
       serverUrl: "https://mcp.asana.com/sse",
-      accessScope: "workspace_member",
+      accessScope: "project_member",
       returnHash: "#servers",
     });
     localStorage.setItem("mcp-oauth-pending", "asana");
@@ -359,12 +362,13 @@ describe("useServerState hosted OAuth callback guards", () => {
         dispatch: vi.fn(),
         isLoading: false,
         isAuthenticated: true,
+        hasSignedInUser: true,
         isAuthLoading: false,
-        isLoadingWorkspaces: false,
+        isLoadingProjects: false,
         useLocalFallback: false,
-        effectiveWorkspaces: {} as any,
-        effectiveActiveWorkspaceId: "ws_1",
-        activeWorkspaceServersFlat: [],
+        effectiveProjects: {} as any,
+        effectiveActiveProjectId: "ws_1",
+        activeProjectServersFlat: [],
         logger: {
           info: vi.fn(),
           warn: vi.fn(),
@@ -377,7 +381,7 @@ describe("useServerState hosted OAuth callback guards", () => {
     await waitFor(() => {
       expect(mockHandleOAuthCallback).toHaveBeenCalledWith(
         expect.objectContaining({
-          surface: "workspace",
+          surface: "project",
           serverName: "asana",
         }),
         "oauth-code",
@@ -390,19 +394,19 @@ describe("useServerState hosted OAuth callback guards", () => {
   });
 
   it("reuses hosted stored OAuth credentials on reconnect before falling back to interactive OAuth", async () => {
-    const workspaceClientConfig = {
+    const projectClientConfig = {
       version: 1 as const,
       clientCapabilities: {
         ...(getDefaultClientCapabilities() as Record<string, unknown>),
         experimental: {
-          workspaceProfile: {},
+          projectProfile: {},
         },
       },
       hostContext: {},
     };
     const dispatch = vi.fn();
     const { result } = renderHostedServerState(dispatch, {
-      workspaceClientConfig,
+      projectClientConfig,
     });
 
     await act(async () => {
@@ -417,7 +421,7 @@ describe("useServerState hosted OAuth callback guards", () => {
           url: "https://mcp.asana.com/sse",
           clientCapabilities: expect.objectContaining({
             experimental: {
-              workspaceProfile: {},
+              projectProfile: {},
             },
           }),
         }),

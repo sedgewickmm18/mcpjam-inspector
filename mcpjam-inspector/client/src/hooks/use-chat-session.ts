@@ -44,7 +44,9 @@ import { useCustomProviders } from "@/hooks/use-custom-providers";
 import { usePersistedModel } from "@/hooks/use-persisted-model";
 import {
   buildAvailableModels,
+  buildAvailableModelsFromOrgConfig,
   getDefaultModel,
+  type OrgVisibleConfig,
 } from "@/components/chat-v2/shared/model-helpers";
 import {
   isMCPJamGuestAllowedModel,
@@ -61,6 +63,10 @@ import {
   authFetch,
   getAuthHeaders as getSessionAuthHeaders,
 } from "@/lib/session-token";
+import {
+  notifyMCPJamLimitError,
+  notifyMCPJamLimitErrorFromResponse,
+} from "@/lib/mcpjam-limit";
 import { getGuestBearerToken } from "@/lib/guest-session";
 import { HOSTED_MODE } from "@/lib/config";
 import { transcriptToUIMessages } from "@/lib/transcript-to-ui-messages";
@@ -97,8 +103,10 @@ export interface UseChatSessionOptions {
   /** Server names to connect to */
   selectedServers: string[];
   /** Visibility to apply when persisting a new direct chat */
-  directVisibility?: "private" | "workspace";
-  /** Hosted runtime context (workspace, server IDs, OAuth tokens, share/chatbox scope) */
+  directVisibility?: "private" | "project";
+  /** Sanitized organization provider config for hosted org-backed projects */
+  hostedOrgModelConfig?: OrgVisibleConfig;
+  /** Hosted runtime context (project, server IDs, OAuth tokens, share/chatbox scope) */
   hostedContext?: HostedRuntimeContext;
   /** Minimal UI mode for shared chat (hides diagnostics surfaces only) */
   minimalMode?: boolean;
@@ -896,6 +904,23 @@ function areAuthHeadersEqual(
   return aKeys.every((key) => a[key] === b[key]);
 }
 
+type HostedSessionScope = {
+  projectId?: string;
+  shareToken?: string;
+  chatboxToken?: string;
+};
+
+function areHostedSessionScopesEqual(
+  a: HostedSessionScope,
+  b: HostedSessionScope
+): boolean {
+  return (
+    a.projectId === b.projectId &&
+    a.shareToken === b.shareToken &&
+    a.chatboxToken === b.chatboxToken
+  );
+}
+
 function isAuthDeniedError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const withStatus = error as { status?: unknown; message?: unknown };
@@ -907,12 +932,13 @@ function isAuthDeniedError(error: unknown): boolean {
 export function useChatSession({
   selectedServers,
   directVisibility = "private",
+  hostedOrgModelConfig,
   hostedContext,
   minimalMode: _minimalMode = false,
   executionConfig,
   onReset,
 }: UseChatSessionOptions): UseChatSessionReturn {
-  const hostedWorkspaceId = hostedContext?.workspaceId;
+  const hostedProjectId = hostedContext?.projectId;
   const hostedSelectedServerIds = hostedContext?.selectedServerIds ?? [];
   const hostedOAuthTokens = hostedContext?.oauthTokens;
   const hostedShareToken = hostedContext?.shareToken;
@@ -1043,20 +1069,25 @@ export function useChatSession({
     HOSTED_MODE &&
     !isAuthenticated &&
     !isAuthLoading &&
-    !hostedWorkspaceId &&
+    !hostedProjectId &&
     !hostedShareToken;
   const sharedGuestMode =
     HOSTED_MODE &&
     !isAuthenticated &&
     !isAuthLoading &&
-    !!hostedWorkspaceId &&
+    !!hostedProjectId &&
     !!(hostedShareToken || hostedChatboxToken);
   const guestMode = directGuestMode || sharedGuestMode;
   const skipNextForkDetectionRef = useRef(false);
   const hasResolvedAuthHeadersRef = useRef(false);
-  const lastResolvedAuthHeadersRef = useRef<
-    Record<string, string> | undefined
-  >(undefined);
+  const lastResolvedAuthHeadersRef = useRef<Record<string, string> | undefined>(
+    undefined
+  );
+  const lastResolvedHostedScopeRef = useRef<HostedSessionScope>({
+    projectId: undefined,
+    shareToken: undefined,
+    chatboxToken: undefined,
+  });
   const pendingSessionHydrationRef = useRef<PendingSessionHydration | null>(
     null
   );
@@ -1151,6 +1182,27 @@ export function useChatSession({
         })
       : models;
     if (HOSTED_MODE) {
+      if (hostedOrgModelConfig) {
+        const orgModels =
+          buildAvailableModelsFromOrgConfig(hostedOrgModelConfig);
+        return !isAuthenticated
+          ? orgModels.map((model) => {
+              const modelId = String(model.id);
+              if (
+                !isMCPJamProvidedModel(modelId) ||
+                isMCPJamGuestAllowedModel(modelId)
+              ) {
+                return model;
+              }
+
+              return {
+                ...model,
+                disabled: true,
+                disabledReason: GUEST_LOCKED_MODEL_REASON,
+              };
+            })
+          : orgModels;
+      }
       return visibleModels.filter((model) =>
         isMCPJamProvidedModel(String(model.id))
       );
@@ -1164,6 +1216,7 @@ export function useChatSession({
     getAzureBaseUrl,
     isAuthenticated,
     customProviders,
+    hostedOrgModelConfig,
   ]);
 
   // Model selection with persistence
@@ -1281,16 +1334,43 @@ export function useChatSession({
   }, [selectedModel]);
   const traceViewsSupported = HOSTED_MODE ? isMcpJamModel : true;
 
-  const hostedChatFetch = useCallback(
+  const chatFetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit) => {
-      const response = await authFetch(input, init);
+      const response = HOSTED_MODE
+        ? await authFetch(input, init)
+        : await fetch(input, init);
       if (!response.ok) {
-        await ingestHostedRpcLogsFromResponse(response);
+        await notifyMCPJamLimitErrorFromResponse(response);
+        if (HOSTED_MODE) {
+          await ingestHostedRpcLogsFromResponse(response);
+        }
       }
       return response;
     },
     []
   );
+
+  const handleChatError = useCallback((chatError: Error) => {
+    // Try to recover a structured limitKind from a JSON-shaped error message
+    // so the concurrency carve-out is honored on the SSE error path. Best
+    // effort: untouched if the message isn't JSON.
+    let limitKind: "total" | "concurrency" | undefined;
+    const jsonStart = chatError.message.indexOf("{");
+    if (jsonStart >= 0) {
+      try {
+        const parsed = JSON.parse(chatError.message.slice(jsonStart));
+        if (parsed && typeof parsed === "object") {
+          const value = (parsed as { limitKind?: unknown }).limitKind;
+          if (value === "total" || value === "concurrency") {
+            limitKind = value;
+          }
+        }
+      } catch {
+        // not JSON; ignore
+      }
+    }
+    notifyMCPJamLimitError({ message: chatError.message, limitKind });
+  }, []);
 
   // Create transport
   const transport = useMemo(() => {
@@ -1321,11 +1401,11 @@ export function useChatSession({
 
     const chatApi = HOSTED_MODE ? "/api/web/chat-v2" : "/api/mcp/chat-v2";
 
-    // Build hosted body based on whether we have a workspace.
-    // Signed-in users are blocked from submitting until hostedWorkspaceId loads
+    // Build hosted body based on whether we have a project.
+    // Signed-in users are blocked from submitting until hostedProjectId loads
     // (via hostedContextNotReady), so this branch only runs for guests.
     const buildHostedBody = () => {
-      if (!hostedWorkspaceId) {
+      if (!hostedProjectId) {
         if (directGuestMode && selectedServers.length > 0) {
           return {
             chatSessionId,
@@ -1341,7 +1421,7 @@ export function useChatSession({
       }
       const isHostedDirectChat = !hostedShareToken && !hostedChatboxToken;
       return {
-        workspaceId: hostedWorkspaceId,
+        projectId: hostedProjectId,
         chatSessionId,
         selectedServerIds: hostedSelectedServerIds,
         selectedServerNames: selectedServers,
@@ -1362,7 +1442,7 @@ export function useChatSession({
 
     return new DefaultChatTransport({
       api: chatApi,
-      fetch: HOSTED_MODE ? hostedChatFetch : undefined,
+      fetch: chatFetch,
       body: () => ({
         model: selectedModel,
         ...(HOSTED_MODE ? {} : { apiKey }),
@@ -1374,8 +1454,8 @@ export function useChatSession({
               selectedServers,
               chatSessionId,
               directVisibility,
-              // Pass workspaceId for BYOK direct-chat history persistence
-              ...(hostedWorkspaceId ? { workspaceId: hostedWorkspaceId } : {}),
+              // Pass projectId for BYOK direct-chat history persistence
+              ...(hostedProjectId ? { projectId: hostedProjectId } : {}),
             }),
         requireToolApproval: requireToolApprovalRef.current,
         ...(!HOSTED_MODE && customProviders.length > 0
@@ -1398,14 +1478,14 @@ export function useChatSession({
     selectedServers,
     directVisibility,
     directGuestMode,
-    hostedWorkspaceId,
+    hostedProjectId,
     chatSessionId,
     hostedSelectedServerIds,
     hostedOAuthTokens,
     hostedShareToken,
     hostedChatboxToken,
     hostedChatboxSurface,
-    hostedChatFetch,
+    chatFetch,
     // requireToolApproval read from ref at request time
   ]);
   // `@ai-sdk/react` only recreates its internal Chat when the chat id changes.
@@ -1436,6 +1516,7 @@ export function useChatSession({
     id: chatSessionId,
     transport: proxyTransport,
     onData: handleStreamDataPart,
+    onError: handleChatError,
     sendAutomaticallyWhen: requireToolApproval
       ? lastAssistantMessageIsCompleteWithApprovalResponses
       : undefined,
@@ -1858,7 +1939,7 @@ export function useChatSession({
       // In non-hosted mode, attach a guest bearer so local chat persistence and
       // history lookups use the same Convex identity as the active thread.
       // In hosted mode, only fall back to guest auth for explicit guest
-      // surfaces. A regular hosted workspace should never silently downgrade.
+      // surfaces. A regular hosted project should never silently downgrade.
       if (!resolved && active && !HOSTED_MODE) {
         const guestToken = await getGuestBearerToken();
         if (!active) return;
@@ -1875,7 +1956,7 @@ export function useChatSession({
         active &&
         !isAuthenticated &&
         HOSTED_MODE &&
-        (!hostedWorkspaceId || !!hostedShareToken || !!hostedChatboxToken)
+        (!hostedProjectId || !!hostedShareToken || !!hostedChatboxToken)
       ) {
         const guestToken = await getGuestBearerToken();
         if (!active) return;
@@ -1902,12 +1983,21 @@ export function useChatSession({
       // wiped by setMessages([]).
       if (active) {
         const previousAuthHeaders = lastResolvedAuthHeadersRef.current;
+        const previousHostedScope = lastResolvedHostedScopeRef.current;
+        const currentHostedScope = {
+          projectId: hostedProjectId,
+          shareToken: hostedShareToken,
+          chatboxToken: hostedChatboxToken,
+        };
         const hasResolvedBefore = hasResolvedAuthHeadersRef.current;
         const authHeadersChanged =
           hasResolvedBefore &&
           !areAuthHeadersEqual(previousAuthHeaders, resolvedAuthHeaders);
+        const hostedScopeChanged =
+          hasResolvedBefore &&
+          !areHostedSessionScopesEqual(previousHostedScope, currentHostedScope);
 
-        if (authHeadersChanged) {
+        if (authHeadersChanged || hostedScopeChanged) {
           skipNextForkDetectionRef.current = true;
           clearPendingSessionHydration();
           setChatSessionId(generateId());
@@ -1920,6 +2010,7 @@ export function useChatSession({
 
         hasResolvedAuthHeadersRef.current = true;
         lastResolvedAuthHeadersRef.current = resolvedAuthHeaders;
+        lastResolvedHostedScopeRef.current = currentHostedScope;
         setIsSessionBootstrapComplete(true);
       }
     })();
@@ -1930,7 +2021,7 @@ export function useChatSession({
     getAccessToken,
     hostedShareToken,
     hostedChatboxToken,
-    hostedWorkspaceId,
+    hostedProjectId,
     isAuthenticated,
     clearPendingSessionHydration,
     setMessages,
@@ -2124,8 +2215,8 @@ export function useChatSession({
 
   // Computed state for UI
   // Compute guest access from React state instead of the global hostedApiContext.
-  // Shared chats are guest-capable even though they are scoped to a workspace,
-  // while direct guests have no workspace at all.
+  // Shared chats are guest-capable even though they are scoped to a project,
+  // while direct guests have no project at all.
   // In hosted mode: always require auth (guest JWT or WorkOS — handled by authFetch).
   // In non-hosted mode: auth is only needed for sign-in-only MCPJam models.
   const requiresAuthForChat = HOSTED_MODE
@@ -2139,11 +2230,11 @@ export function useChatSession({
     !isAuthenticated && requiresAuthForChat && !guestMode;
   const authHeadersNotReady =
     requiresAuthForChat && isAuthenticated && !authHeaders;
-  // Direct guests don't need a workspace; shared guests still do.
+  // Direct guests don't need a project; shared guests still do.
   const hostedContextNotReady =
     HOSTED_MODE &&
     !directGuestMode &&
-    (!hostedWorkspaceId ||
+    (!hostedProjectId ||
       (selectedServers.length > 0 &&
         hostedSelectedServerIds.length !== selectedServers.length));
   const isStreaming = status === "streaming" || status === "submitted";

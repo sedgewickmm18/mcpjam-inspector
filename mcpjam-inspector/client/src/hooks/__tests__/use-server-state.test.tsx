@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppState, AppAction } from "@/state/app-types";
+import type { AppState, AppAction, ServerWithName } from "@/state/app-types";
 import { CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE } from "@/lib/client-config";
-import type { WorkspaceClientConfig } from "@/lib/client-config";
+import type { ProjectClientConfig } from "@/lib/client-config";
 import { useClientConfigStore } from "@/stores/client-config-store";
 import { useHostContextStore } from "@/stores/host-context-store";
 import { useServerState } from "../use-server-state";
@@ -18,6 +19,8 @@ const {
   readStoredOAuthConfigMock,
   testConnectionMock,
   mockConvexQuery,
+  mockCreateServer,
+  mockUpdateServer,
 } = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -29,6 +32,8 @@ const {
   readStoredOAuthConfigMock: vi.fn(),
   testConnectionMock: vi.fn(),
   mockConvexQuery: vi.fn(),
+  mockCreateServer: vi.fn(),
+  mockUpdateServer: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -83,24 +88,24 @@ vi.mock("@/stores/ui-playground-store", () => ({
   },
 }));
 
-vi.mock("../useWorkspaces", () => ({
+vi.mock("../useProjects", () => ({
   useServerMutations: () => ({
-    createServer: vi.fn(),
-    updateServer: vi.fn(),
+    createServer: mockCreateServer,
+    updateServer: mockUpdateServer,
     deleteServer: vi.fn(),
   }),
 }));
 
 function createAppState(options?: {
-  workspaceClientConfig?: WorkspaceClientConfig;
+  projectClientConfig?: ProjectClientConfig;
   serverCapabilities?: Record<string, unknown>;
 }): AppState {
   return {
-    workspaces: {
+    projects: {
       default: {
         id: "default",
         name: "Default",
-        clientConfig: options?.workspaceClientConfig,
+        clientConfig: options?.projectClientConfig,
         servers: {
           "demo-server": {
             name: "demo-server",
@@ -121,7 +126,7 @@ function createAppState(options?: {
         isDefault: true,
       },
     },
-    activeWorkspaceId: "default",
+    activeProjectId: "default",
     servers: {
       "demo-server": {
         name: "demo-server",
@@ -147,12 +152,13 @@ function renderUseServerState(
   dispatch: (action: AppAction) => void,
   appState = createAppState(),
   options?: {
+    hasSignedInUser?: boolean;
     isAuthenticated?: boolean;
     useLocalFallback?: boolean;
-    effectiveWorkspaces?: AppState["workspaces"];
-    effectiveActiveWorkspaceId?: string;
-    activeWorkspaceServersFlat?: any;
-  },
+    effectiveProjects?: AppState["projects"];
+    effectiveActiveProjectId?: string;
+    activeProjectServersFlat?: any;
+  }
 ) {
   return renderHook(() =>
     useServerState({
@@ -160,22 +166,108 @@ function renderUseServerState(
       dispatch,
       isLoading: false,
       isAuthenticated: options?.isAuthenticated ?? false,
+      hasSignedInUser: options?.hasSignedInUser ?? false,
       isAuthLoading: false,
-      isLoadingWorkspaces: false,
+      isLoadingProjects: false,
       useLocalFallback: options?.useLocalFallback ?? true,
-      effectiveWorkspaces: options?.effectiveWorkspaces ?? appState.workspaces,
-      effectiveActiveWorkspaceId:
-        options?.effectiveActiveWorkspaceId ?? appState.activeWorkspaceId,
-      activeWorkspaceServersFlat: options?.activeWorkspaceServersFlat,
+      effectiveProjects: options?.effectiveProjects ?? appState.projects,
+      effectiveActiveProjectId:
+        options?.effectiveActiveProjectId ?? appState.activeProjectId,
+      activeProjectServersFlat: options?.activeProjectServersFlat,
       logger: {
         info: vi.fn(),
         warn: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
       },
-    }),
+    })
   );
 }
+
+describe("useServerState effective server projection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("surfaces connected or connecting runtime-only servers", () => {
+    const appState = createAppState();
+    const persistedServer: ServerWithName = {
+      name: "persisted-server",
+      config: {
+        type: "http",
+        url: "https://persisted.example.com/mcp",
+      } as any,
+      lastConnectionTime: new Date(),
+      connectionStatus: "disconnected",
+      retryCount: 0,
+      enabled: true,
+    };
+    const runtimeConnected: ServerWithName = {
+      name: "runtime-connected",
+      config: {
+        type: "http",
+        url: "https://runtime-connected.example.com/mcp",
+      } as any,
+      lastConnectionTime: new Date(),
+      connectionStatus: "connected",
+      retryCount: 0,
+      enabled: true,
+    };
+    const runtimeConnecting: ServerWithName = {
+      name: "runtime-connecting",
+      config: {
+        type: "http",
+        url: "https://runtime-connecting.example.com/mcp",
+      } as any,
+      lastConnectionTime: new Date(),
+      connectionStatus: "connecting",
+      retryCount: 0,
+      enabled: true,
+    };
+    const runtimeFailed: ServerWithName = {
+      name: "runtime-failed",
+      config: {
+        type: "http",
+        url: "https://runtime-failed.example.com/mcp",
+      } as any,
+      lastConnectionTime: new Date(),
+      connectionStatus: "failed",
+      retryCount: 0,
+      enabled: true,
+    };
+
+    appState.projects.default.servers = {
+      "persisted-server": persistedServer,
+    };
+    appState.servers = {
+      "runtime-connected": runtimeConnected,
+      "runtime-connecting": runtimeConnecting,
+      "runtime-failed": runtimeFailed,
+    };
+    appState.selectedServer = "runtime-connected";
+
+    const dispatch = vi.fn();
+    const { result } = renderUseServerState(dispatch, appState);
+
+    expect(result.current.projectServers).toEqual(
+      expect.objectContaining({
+        "persisted-server": expect.any(Object),
+        "runtime-connected": runtimeConnected,
+        "runtime-connecting": runtimeConnecting,
+      })
+    );
+    expect(result.current.projectServers).not.toHaveProperty("runtime-failed");
+    expect(result.current.selectedMCPConfig).toBe(runtimeConnected.config);
+    expect(result.current.connectedOrConnectingServerConfigs).toEqual(
+      expect.objectContaining({
+        "runtime-connected": runtimeConnected,
+        "runtime-connecting": runtimeConnecting,
+      })
+    );
+  });
+});
 
 describe("useServerState OAuth callback failures", () => {
   beforeEach(() => {
@@ -183,7 +275,7 @@ describe("useServerState OAuth callback failures", () => {
     localStorage.clear();
     window.history.replaceState({}, "", "/");
     useClientConfigStore.setState({
-      activeWorkspaceId: null,
+      activeProjectId: null,
       defaultConfig: null,
       savedConfig: undefined,
       draftConfig: null,
@@ -193,12 +285,12 @@ describe("useServerState OAuth callback failures", () => {
       connectionDefaultsError: null,
       isSaving: false,
       isDirty: false,
-      pendingWorkspaceId: null,
+      pendingProjectId: null,
       pendingSavedConfig: undefined,
       isAwaitingRemoteEcho: false,
     });
     useHostContextStore.setState({
-      activeWorkspaceId: null,
+      activeProjectId: null,
       defaultHostContext: {},
       savedHostContext: undefined,
       draftHostContext: {},
@@ -206,7 +298,7 @@ describe("useServerState OAuth callback failures", () => {
       hostContextError: null,
       isSaving: false,
       isDirty: false,
-      pendingWorkspaceId: null,
+      pendingProjectId: null,
       pendingSavedHostContext: undefined,
       isAwaitingRemoteEcho: false,
     });
@@ -226,6 +318,8 @@ describe("useServerState OAuth callback failures", () => {
       useRegistryOAuthProxy: false,
     });
     mockConvexQuery.mockResolvedValue(null);
+    mockCreateServer.mockReset();
+    mockUpdateServer.mockReset();
   });
 
   it("marks the pending server as failed when authorization is denied", async () => {
@@ -234,7 +328,7 @@ describe("useServerState OAuth callback failures", () => {
     window.history.replaceState(
       {},
       "",
-      "/oauth/callback?error=access_denied&error_description=User%20denied%20access",
+      "/oauth/callback?error=access_denied&error_description=User%20denied%20access"
     );
 
     const dispatch = vi.fn();
@@ -249,7 +343,7 @@ describe("useServerState OAuth callback failures", () => {
     });
 
     expect(toastError).toHaveBeenCalledWith(
-      "OAuth authorization failed: access_denied: User denied access",
+      "OAuth authorization failed: access_denied: User denied access"
     );
     expect(localStorage.getItem("mcp-oauth-pending")).toBeNull();
     expect(window.location.pathname).toBe("/");
@@ -278,7 +372,7 @@ describe("useServerState OAuth callback failures", () => {
     });
 
     expect(toastError).toHaveBeenCalledWith(
-      "Error completing OAuth flow: Token exchange failed",
+      "Error completing OAuth flow: Token exchange failed"
     );
     expect(localStorage.getItem("mcp-oauth-pending")).toBeNull();
   });
@@ -301,7 +395,7 @@ describe("useServerState OAuth callback failures", () => {
 
     await waitFor(() => {
       expect(toastSuccess).toHaveBeenCalledWith(
-        "OAuth connection successful! Connected to demo-server.",
+        "OAuth connection successful! Connected to demo-server."
       );
     });
 
@@ -355,7 +449,7 @@ describe("useServerState OAuth callback failures", () => {
       },
     };
     appState.servers["demo-server"] = existingServer;
-    appState.workspaces.default.servers["demo-server"] = existingServer;
+    appState.projects.default.servers["demo-server"] = existingServer;
 
     const dispatch = vi.fn();
     renderUseServerState(dispatch, appState);
@@ -382,12 +476,12 @@ describe("useServerState OAuth callback failures", () => {
             },
           },
         }),
-        "demo-server",
+        "demo-server"
       );
     });
 
     const upsertAction = dispatch.mock.calls.find(
-      ([action]) => action.type === "UPSERT_SERVER",
+      ([action]) => action.type === "UPSERT_SERVER"
     )?.[0] as AppAction | undefined;
     expect(upsertAction).toMatchObject({
       type: "UPSERT_SERVER",
@@ -426,7 +520,7 @@ describe("useServerState OAuth callback failures", () => {
       } as any,
     };
     appState.servers["demo-server"] = existingServer;
-    appState.workspaces.default.servers["demo-server"] = existingServer;
+    appState.projects.default.servers["demo-server"] = existingServer;
 
     const dispatch = vi.fn();
     renderUseServerState(dispatch, appState);
@@ -441,7 +535,7 @@ describe("useServerState OAuth callback failures", () => {
             }),
           }),
         }),
-        "demo-server",
+        "demo-server"
       );
     });
 
@@ -450,9 +544,9 @@ describe("useServerState OAuth callback failures", () => {
     expect(connectConfig).not.toHaveProperty("args");
   });
 
-  it("blocks connect while workspace client config sync is pending", async () => {
+  it("blocks connect while project client config sync is pending", async () => {
     useClientConfigStore.setState({
-      pendingWorkspaceId: "default",
+      pendingProjectId: "default",
       isAwaitingRemoteEcho: true,
     });
 
@@ -466,17 +560,18 @@ describe("useServerState OAuth callback failures", () => {
     });
 
     expect(toastError).toHaveBeenCalledWith(
-      CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE,
+      CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE
     );
     expect(
-      dispatch.mock.calls.some(([action]) => action.type === "CONNECT_REQUEST"),
+      dispatch.mock.calls.some(([action]) => action.type === "CONNECT_REQUEST")
     ).toBe(false);
   });
 
-  it("applies workspace connection defaults on local reconnect", async () => {
+  it("applies project connection defaults on local reconnect", async () => {
     const { reconnectServer } = await import("@/state/mcp-api");
-    const { ensureAuthorizedForReconnect } =
-      await import("@/state/oauth-orchestrator");
+    const { ensureAuthorizedForReconnect } = await import(
+      "@/state/oauth-orchestrator"
+    );
     vi.mocked(reconnectServer).mockResolvedValue({
       success: true,
       initInfo: {
@@ -485,17 +580,17 @@ describe("useServerState OAuth callback failures", () => {
     } as any);
 
     const appState = createAppState({
-      workspaceClientConfig: {
+      projectClientConfig: {
         version: 1,
         connectionDefaults: {
           headers: {
-            "X-Workspace-Header": "workspace",
+            "X-Project-Header": "project",
           },
           requestTimeout: 30000,
         },
         clientCapabilities: {
           experimental: {
-            workspaceProfile: {},
+            projectProfile: {},
           },
         },
         hostContext: {},
@@ -509,7 +604,7 @@ describe("useServerState OAuth callback failures", () => {
     const { result } = renderUseServerState(dispatch, appState);
     vi.mocked(ensureAuthorizedForReconnect).mockResolvedValue({
       kind: "ready",
-      serverConfig: appState.workspaces.default.servers["demo-server"].config,
+      serverConfig: appState.projects.default.servers["demo-server"].config,
       tokens: undefined,
     } as any);
 
@@ -523,29 +618,30 @@ describe("useServerState OAuth callback failures", () => {
     expect(effectiveConfig).toMatchObject({
       requestInit: {
         headers: {
-          "X-Workspace-Header": "workspace",
+          "X-Project-Header": "project",
         },
       },
       timeout: 30000,
       capabilities: {
         experimental: {
-          workspaceProfile: {},
+          projectProfile: {},
         },
         sampling: {},
       },
       clientCapabilities: {
         experimental: {
-          workspaceProfile: {},
+          projectProfile: {},
         },
         sampling: {},
       },
     });
   });
 
-  it("prefers an exact per-server clientCapabilities override over workspace capability merging", async () => {
+  it("prefers an exact per-server clientCapabilities override over project capability merging", async () => {
     const { reconnectServer } = await import("@/state/mcp-api");
-    const { ensureAuthorizedForReconnect } =
-      await import("@/state/oauth-orchestrator");
+    const { ensureAuthorizedForReconnect } = await import(
+      "@/state/oauth-orchestrator"
+    );
     vi.mocked(reconnectServer).mockResolvedValue({
       success: true,
       initInfo: {
@@ -554,7 +650,7 @@ describe("useServerState OAuth callback failures", () => {
     } as any);
 
     const appState = createAppState({
-      workspaceClientConfig: {
+      projectClientConfig: {
         version: 1,
         connectionDefaults: {
           headers: {},
@@ -562,7 +658,7 @@ describe("useServerState OAuth callback failures", () => {
         },
         clientCapabilities: {
           experimental: {
-            workspaceProfile: {},
+            projectProfile: {},
           },
         },
         hostContext: {},
@@ -572,7 +668,7 @@ describe("useServerState OAuth callback failures", () => {
       },
     });
 
-    appState.workspaces.default.servers["demo-server"].config = {
+    appState.projects.default.servers["demo-server"].config = {
       url: "https://example.com/mcp",
       capabilities: {
         sampling: {},
@@ -584,13 +680,13 @@ describe("useServerState OAuth callback failures", () => {
       },
     } as any;
     appState.servers["demo-server"].config =
-      appState.workspaces.default.servers["demo-server"].config;
+      appState.projects.default.servers["demo-server"].config;
 
     const dispatch = vi.fn();
     const { result } = renderUseServerState(dispatch, appState);
     vi.mocked(ensureAuthorizedForReconnect).mockResolvedValue({
       kind: "ready",
-      serverConfig: appState.workspaces.default.servers["demo-server"].config,
+      serverConfig: appState.projects.default.servers["demo-server"].config,
       tokens: undefined,
     } as any);
 
@@ -637,7 +733,7 @@ describe("useServerState OAuth callback failures", () => {
 
     expect(mockConvexQuery).toHaveBeenCalledWith(
       "registryServers:getRegistryServerOAuthConfig",
-      { registryServerId: "registry-asana" },
+      { registryServerId: "registry-asana" }
     );
     expect(initiateOAuthMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -648,7 +744,7 @@ describe("useServerState OAuth callback failures", () => {
         registryServerId: "registry-asana",
         useRegistryOAuthProxy: true,
         scopes: ["default"],
-      }),
+      })
     );
   });
 
@@ -680,7 +776,7 @@ describe("useServerState OAuth callback failures", () => {
         registryServerId: "registry-linear",
         useRegistryOAuthProxy: false,
         scopes: ["read", "write"],
-      }),
+      })
     );
   });
 
@@ -707,7 +803,7 @@ describe("useServerState OAuth callback failures", () => {
       error: "Failed to resolve registry OAuth config: registry lookup failed",
     });
     expect(toastError).toHaveBeenCalledWith(
-      "Network error: Failed to resolve registry OAuth config: registry lookup failed",
+      "Network error: Failed to resolve registry OAuth config: registry lookup failed"
     );
   });
 
@@ -721,7 +817,7 @@ describe("useServerState OAuth callback failures", () => {
         useRegistryOAuthProxy: true,
         protocolVersion: "2025-11-25",
         registrationStrategy: "preregistered",
-      }),
+      })
     );
     readStoredOAuthConfigMock.mockReturnValueOnce({
       scopes: ["default"],
@@ -736,7 +832,7 @@ describe("useServerState OAuth callback failures", () => {
       JSON.stringify({
         client_id: "asana-client-id",
         client_secret: "asana-client-secret",
-      }),
+      })
     );
     clearOAuthDataMock.mockImplementationOnce((serverName: string) => {
       localStorage.removeItem(`mcp-oauth-config-${serverName}`);
@@ -766,7 +862,7 @@ describe("useServerState OAuth callback failures", () => {
         useRegistryOAuthProxy: true,
         protocolVersion: "2025-11-25",
         registrationStrategy: "preregistered",
-      }),
+      })
     );
     expect(dispatch).toHaveBeenCalledWith({
       type: "UPSERT_SERVER",
@@ -795,7 +891,7 @@ describe("useServerState OAuth callback failures", () => {
       JSON.stringify({
         client_id: "stored-client-id",
         client_secret: "stored-client-secret",
-      }),
+      })
     );
     initiateOAuthMock.mockResolvedValueOnce({ success: true });
 
@@ -814,8 +910,7 @@ describe("useServerState OAuth callback failures", () => {
       },
     };
     appState.servers["demo-server"] = profiledServer as any;
-    appState.workspaces.default.servers["demo-server"] =
-      profiledServer as any;
+    appState.projects.default.servers["demo-server"] = profiledServer as any;
 
     const dispatch = vi.fn();
     const { result } = renderUseServerState(dispatch, appState);
@@ -841,7 +936,7 @@ describe("useServerState OAuth callback failures", () => {
         protocolVersion: "2025-11-25",
         registrationMode: "preregistered",
         registrationStrategy: "preregistered",
-      }),
+      })
     );
   });
 
@@ -874,7 +969,7 @@ describe("useServerState auth mode regressions", () => {
     localStorage.clear();
     window.history.replaceState({}, "", "/");
     useClientConfigStore.setState({
-      activeWorkspaceId: null,
+      activeProjectId: null,
       defaultConfig: null,
       savedConfig: undefined,
       draftConfig: null,
@@ -884,12 +979,12 @@ describe("useServerState auth mode regressions", () => {
       connectionDefaultsError: null,
       isSaving: false,
       isDirty: false,
-      pendingWorkspaceId: null,
+      pendingProjectId: null,
       pendingSavedConfig: undefined,
       isAwaitingRemoteEcho: false,
     });
     useHostContextStore.setState({
-      activeWorkspaceId: null,
+      activeProjectId: null,
       defaultHostContext: {},
       savedHostContext: undefined,
       draftHostContext: {},
@@ -897,7 +992,7 @@ describe("useServerState auth mode regressions", () => {
       hostContextError: null,
       isSaving: false,
       isDirty: false,
-      pendingWorkspaceId: null,
+      pendingProjectId: null,
       pendingSavedHostContext: undefined,
       isAwaitingRemoteEcho: false,
     });
@@ -925,7 +1020,7 @@ describe("useServerState auth mode regressions", () => {
       useOAuth: true,
     };
     appState.servers["demo-server"] = oauthServer as any;
-    appState.workspaces.default.servers["demo-server"] = {
+    appState.projects.default.servers["demo-server"] = {
       ...oauthServer,
     } as any;
 
@@ -944,10 +1039,8 @@ describe("useServerState auth mode regressions", () => {
     const connectSuccessAction = dispatch.mock.calls
       .map(([action]) => action)
       .find(
-        (
-          action,
-        ): action is Extract<AppAction, { type: "CONNECT_SUCCESS" }> =>
-          action.type === "CONNECT_SUCCESS",
+        (action): action is Extract<AppAction, { type: "CONNECT_SUCCESS" }> =>
+          action.type === "CONNECT_SUCCESS"
       );
 
     expect(connectSuccessAction).toMatchObject({
@@ -961,8 +1054,9 @@ describe("useServerState auth mode regressions", () => {
 
   it("keeps reconnects on the direct path once a server is marked non-OAuth", async () => {
     const { reconnectServer } = await import("@/state/mcp-api");
-    const { ensureAuthorizedForReconnect } =
-      await import("@/state/oauth-orchestrator");
+    const { ensureAuthorizedForReconnect } = await import(
+      "@/state/oauth-orchestrator"
+    );
     vi.mocked(reconnectServer).mockResolvedValue({
       success: true,
       initInfo: {},
@@ -976,7 +1070,7 @@ describe("useServerState auth mode regressions", () => {
       useOAuth: false,
     };
     appState.servers["demo-server"] = directServer as any;
-    appState.workspaces.default.servers["demo-server"] = {
+    appState.projects.default.servers["demo-server"] = {
       ...directServer,
     } as any;
 
@@ -998,16 +1092,14 @@ describe("useServerState auth mode regressions", () => {
         name: "demo-server",
         useOAuth: false,
       }),
-      expect.any(Object),
+      expect.any(Object)
     );
 
     const connectSuccessAction = dispatch.mock.calls
       .map(([action]) => action)
       .find(
-        (
-          action,
-        ): action is Extract<AppAction, { type: "CONNECT_SUCCESS" }> =>
-          action.type === "CONNECT_SUCCESS",
+        (action): action is Extract<AppAction, { type: "CONNECT_SUCCESS" }> =>
+          action.type === "CONNECT_SUCCESS"
       );
 
     expect(connectSuccessAction).toMatchObject({
@@ -1026,7 +1118,7 @@ describe("useServerState authenticated fallback persistence", () => {
     localStorage.clear();
     window.history.replaceState({}, "", "/");
     useClientConfigStore.setState({
-      activeWorkspaceId: null,
+      activeProjectId: null,
       defaultConfig: null,
       savedConfig: undefined,
       draftConfig: null,
@@ -1036,12 +1128,12 @@ describe("useServerState authenticated fallback persistence", () => {
       connectionDefaultsError: null,
       isSaving: false,
       isDirty: false,
-      pendingWorkspaceId: null,
+      pendingProjectId: null,
       pendingSavedConfig: undefined,
       isAwaitingRemoteEcho: false,
     });
     useHostContextStore.setState({
-      activeWorkspaceId: null,
+      activeProjectId: null,
       defaultHostContext: {},
       savedHostContext: undefined,
       draftHostContext: {},
@@ -1049,7 +1141,7 @@ describe("useServerState authenticated fallback persistence", () => {
       hostContextError: null,
       isSaving: false,
       isDirty: false,
-      pendingWorkspaceId: null,
+      pendingProjectId: null,
       pendingSavedHostContext: undefined,
       isAwaitingRemoteEcho: false,
     });
@@ -1062,7 +1154,7 @@ describe("useServerState authenticated fallback persistence", () => {
     mockConvexQuery.mockResolvedValue(null);
   });
 
-  it("persists saved server configs into the local workspace in authenticated fallback mode", async () => {
+  it("persists saved server configs into the local project in authenticated fallback mode", async () => {
     const dispatch = vi.fn();
     const { result } = renderUseServerState(dispatch, createAppState(), {
       isAuthenticated: true,
@@ -1079,31 +1171,31 @@ describe("useServerState authenticated fallback persistence", () => {
       });
     });
 
-    const updateWorkspaceAction = dispatch.mock.calls
+    const updateProjectAction = dispatch.mock.calls
       .map(([action]) => action)
       .find(
-        (action): action is Extract<AppAction, { type: "UPDATE_WORKSPACE" }> =>
-          action.type === "UPDATE_WORKSPACE",
+        (action): action is Extract<AppAction, { type: "UPDATE_PROJECT" }> =>
+          action.type === "UPDATE_PROJECT"
       );
 
-    expect(updateWorkspaceAction).toMatchObject({
-      type: "UPDATE_WORKSPACE",
-      workspaceId: "default",
+    expect(updateProjectAction).toMatchObject({
+      type: "UPDATE_PROJECT",
+      projectId: "default",
     });
-    expect(updateWorkspaceAction?.updates.servers).toEqual(
+    expect(updateProjectAction?.updates.servers).toEqual(
       expect.objectContaining({
         "demo-server": expect.any(Object),
         "saved-fallback": expect.objectContaining({
           name: "saved-fallback",
         }),
-      }),
+      })
     );
     expect(toastSuccess).toHaveBeenCalledWith(
-      "Saved configuration for saved-fallback",
+      "Saved configuration for saved-fallback"
     );
   });
 
-  it("persists renamed servers into the local workspace in authenticated fallback mode", async () => {
+  it("persists renamed servers into the local project in authenticated fallback mode", async () => {
     const dispatch = vi.fn();
     const { result } = renderUseServerState(dispatch, createAppState(), {
       isAuthenticated: true,
@@ -1121,28 +1213,26 @@ describe("useServerState authenticated fallback persistence", () => {
           url: "https://example.com/mcp",
           useOAuth: true,
         },
-        true,
+        true
       );
     });
 
-    const updateWorkspaceAction = dispatch.mock.calls
+    const updateProjectAction = dispatch.mock.calls
       .map(([action]) => action)
       .find(
-        (action): action is Extract<AppAction, { type: "UPDATE_WORKSPACE" }> =>
-          action.type === "UPDATE_WORKSPACE",
+        (action): action is Extract<AppAction, { type: "UPDATE_PROJECT" }> =>
+          action.type === "UPDATE_PROJECT"
       );
 
-    expect(updateWorkspaceAction).toMatchObject({
-      type: "UPDATE_WORKSPACE",
-      workspaceId: "default",
+    expect(updateProjectAction).toMatchObject({
+      type: "UPDATE_PROJECT",
+      projectId: "default",
     });
-    expect(
-      updateWorkspaceAction?.updates.servers["demo-server"],
-    ).toBeUndefined();
-    expect(updateWorkspaceAction?.updates.servers["renamed-server"]).toEqual(
+    expect(updateProjectAction?.updates.servers["demo-server"]).toBeUndefined();
+    expect(updateProjectAction?.updates.servers["renamed-server"]).toEqual(
       expect.objectContaining({
         name: "renamed-server",
-      }),
+      })
     );
     expect(toastSuccess).toHaveBeenCalledWith("Server configuration updated");
   });
@@ -1153,22 +1243,75 @@ describe("useServerState OAuth callback in-flight dispatch", () => {
     vi.clearAllMocks();
     localStorage.clear();
     window.history.replaceState({}, "", "/");
+    useClientConfigStore.setState({
+      activeProjectId: null,
+      defaultConfig: null,
+      savedConfig: undefined,
+      draftConfig: null,
+      connectionDefaultsText: "{}",
+      clientCapabilitiesText: "{}",
+      clientCapabilitiesError: null,
+      connectionDefaultsError: null,
+      isSaving: false,
+      isDirty: false,
+      pendingProjectId: null,
+      pendingSavedConfig: undefined,
+      isAwaitingRemoteEcho: false,
+    });
+    useHostContextStore.setState({
+      activeProjectId: null,
+      defaultHostContext: {},
+      savedHostContext: undefined,
+      draftHostContext: {},
+      hostContextText: "{}",
+      hostContextError: null,
+      isSaving: false,
+      isDirty: false,
+      pendingProjectId: null,
+      pendingSavedHostContext: undefined,
+      isAwaitingRemoteEcho: false,
+    });
+    // This block is not nested under "OAuth callback failures"; restore defaults
+    // so readStoredOAuthConfig is not a bare vi.fn() returning undefined.
+    getStoredTokensMock.mockReturnValue(undefined);
+    testConnectionMock.mockResolvedValue({
+      success: true,
+      initInfo: null,
+    });
+    readStoredOAuthConfigMock.mockReturnValue({
+      registryServerId: undefined,
+      useRegistryOAuthProxy: false,
+    });
+    completeHostedOAuthCallbackMock.mockReset();
+    completeHostedOAuthCallbackMock.mockResolvedValue({
+      success: false,
+      error: "Hosted OAuth callback should be mocked per test",
+    });
+    mockConvexQuery.mockResolvedValue(null);
+    mockCreateServer.mockReset();
+    mockUpdateServer.mockReset();
   });
 
   it("dispatches CONNECT_REQUEST for the pending server before token exchange completes", async () => {
     const { listServers } = await import("@/state/mcp-api");
-    vi.mocked(listServers).mockResolvedValue({ success: true, servers: [] } as any);
+    vi.mocked(listServers).mockResolvedValue({
+      success: true,
+      servers: [],
+    } as any);
 
     localStorage.setItem("mcp-oauth-pending", "demo-server");
     localStorage.setItem("mcp-oauth-return-hash", "#demo-server");
-    localStorage.setItem("mcp-serverUrl-demo-server", "https://example.com/mcp");
+    localStorage.setItem(
+      "mcp-serverUrl-demo-server",
+      "https://example.com/mcp"
+    );
 
     // Slow token exchange — controllable promise so we can assert before it resolves
     let resolveTokenExchange!: (value: unknown) => void;
     handleOAuthCallbackMock.mockReturnValue(
       new Promise((resolve) => {
         resolveTokenExchange = resolve;
-      }),
+      })
     );
 
     window.history.replaceState({}, "", "/oauth/callback?code=test-code");
@@ -1182,13 +1325,13 @@ describe("useServerState OAuth callback in-flight dispatch", () => {
         expect.objectContaining({
           type: "CONNECT_REQUEST",
           name: "demo-server",
-        }),
+        })
       );
     });
 
     // Token exchange hasn't finished yet — no CONNECT_SUCCESS dispatched
     expect(
-      dispatch.mock.calls.some(([a]) => a.type === "CONNECT_SUCCESS"),
+      dispatch.mock.calls.some(([a]) => a.type === "CONNECT_SUCCESS")
     ).toBe(false);
 
     // Now let the token exchange complete and verify the full happy path
@@ -1204,8 +1347,577 @@ describe("useServerState OAuth callback in-flight dispatch", () => {
           type: "CONNECT_SUCCESS",
           name: "demo-server",
           useOAuth: true,
-        }),
+        })
       );
     });
+  });
+});
+
+describe("persistRuntimeServerToProjectIfNeeded", () => {
+  function buildCloudPersistState(
+    connectionStatus: ServerWithName["connectionStatus"] = "connected"
+  ): AppState {
+    const projects: AppState["projects"] = {
+      proj_cloud: {
+        id: "proj_cloud",
+        name: "Cloud",
+        servers: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isDefault: true,
+      },
+    };
+    return {
+      projects,
+      activeProjectId: "proj_cloud",
+      servers: {
+        "rt-server": {
+          name: "rt-server",
+          config: { url: "https://runtime.example/mcp" } as any,
+          lastConnectionTime: new Date(),
+          connectionStatus,
+          retryCount: 0,
+          enabled: true,
+          useOAuth: false,
+        },
+      },
+      selectedServer: "rt-server",
+      selectedMultipleServers: [],
+      isMultiSelectMode: false,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreateServer.mockReset();
+    mockUpdateServer.mockReset();
+    useClientConfigStore.setState({
+      activeProjectId: null,
+      defaultConfig: null,
+      savedConfig: undefined,
+      draftConfig: null,
+      connectionDefaultsText: "{}",
+      clientCapabilitiesText: "{}",
+      clientCapabilitiesError: null,
+      connectionDefaultsError: null,
+      isSaving: false,
+      isDirty: false,
+      pendingProjectId: null,
+      pendingSavedConfig: undefined,
+      isAwaitingRemoteEcho: false,
+    });
+    useHostContextStore.setState({
+      activeProjectId: null,
+      defaultHostContext: {},
+      savedHostContext: undefined,
+      draftHostContext: {},
+      hostContextText: "{}",
+      hostContextError: null,
+      isSaving: false,
+      isDirty: false,
+      pendingProjectId: null,
+      pendingSavedHostContext: undefined,
+      isAwaitingRemoteEcho: false,
+    });
+    mockConvexQuery.mockResolvedValue(null);
+  });
+
+  it("persists selected runtime-only connected server", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState("connected");
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: [],
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: true,
+        hasSignedInUser: true,
+        isAuthLoading: false,
+        isLoadingProjects: false,
+        useLocalFallback: false,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    mockCreateServer.mockImplementation(async () => {
+      flatRef.current = [{ _id: "new_srv_id", name: "rt-server" }];
+      flushSync(() => {
+        rerender();
+      });
+      return "new_srv_id";
+    });
+
+    await act(async () => {
+      const out = await result.current.persistRuntimeServerToProjectIfNeeded(
+        "rt-server"
+      );
+      expect(out).toBe("persisted");
+    });
+
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
+    expect(mockUpdateServer).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for guest-like or unsigned state", async () => {
+    mockCreateServer.mockResolvedValue("id");
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const { result } = renderUseServerState(dispatch, appState, {
+      hasSignedInUser: false,
+      isAuthenticated: true,
+      useLocalFallback: false,
+      effectiveProjects: appState.projects,
+      effectiveActiveProjectId: "proj_cloud",
+      activeProjectServersFlat: [],
+    });
+
+    await act(async () => {
+      expect(
+        await result.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("noop");
+    });
+
+    const { result: r2 } = renderUseServerState(dispatch, appState, {
+      hasSignedInUser: true,
+      isAuthenticated: false,
+      useLocalFallback: false,
+      effectiveProjects: appState.projects,
+      effectiveActiveProjectId: "proj_cloud",
+      activeProjectServersFlat: [],
+    });
+    await act(async () => {
+      expect(
+        await r2.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("noop");
+    });
+
+    const { result: r3 } = renderUseServerState(dispatch, appState, {
+      hasSignedInUser: true,
+      isAuthenticated: true,
+      useLocalFallback: true,
+      effectiveProjects: appState.projects,
+      effectiveActiveProjectId: "proj_cloud",
+      activeProjectServersFlat: [],
+    });
+    await act(async () => {
+      expect(
+        await r3.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("noop");
+    });
+
+    expect(mockCreateServer).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for missing or non-connected runtime server", async () => {
+    mockCreateServer.mockResolvedValue("id");
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState("connecting");
+    const { result } = renderUseServerState(dispatch, appState, {
+      hasSignedInUser: true,
+      isAuthenticated: true,
+      useLocalFallback: false,
+      effectiveProjects: appState.projects,
+      effectiveActiveProjectId: "proj_cloud",
+      activeProjectServersFlat: [],
+    });
+
+    await act(async () => {
+      expect(
+        await result.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("noop");
+    });
+
+    for (const status of ["failed", "disconnected", "oauth-flow"] as const) {
+      const st = buildCloudPersistState(status);
+      const { result: r } = renderUseServerState(dispatch, st, {
+        hasSignedInUser: true,
+        isAuthenticated: true,
+        useLocalFallback: false,
+        effectiveProjects: st.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: [],
+      });
+      await act(async () => {
+        expect(
+          await r.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+        ).toBe("noop");
+      });
+    }
+
+    const missing = buildCloudPersistState();
+    const { result: rm } = renderUseServerState(dispatch, missing, {
+      hasSignedInUser: true,
+      isAuthenticated: true,
+      useLocalFallback: false,
+      effectiveProjects: missing.projects,
+      effectiveActiveProjectId: "proj_cloud",
+      activeProjectServersFlat: [],
+    });
+    await act(async () => {
+      expect(
+        await rm.current.persistRuntimeServerToProjectIfNeeded("nope")
+      ).toBe("noop");
+    });
+
+    expect(mockCreateServer).not.toHaveBeenCalled();
+  });
+
+  it("waits for project server snapshot before deciding collision", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: undefined,
+    };
+
+    mockCreateServer.mockImplementation(async () => {
+      flatRef.current = [{ _id: "new", name: "rt-server" }];
+      flushSync(() => {
+        rerender();
+      });
+      return "new";
+    });
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: true,
+        hasSignedInUser: true,
+        isAuthLoading: false,
+        isLoadingProjects: false,
+        useLocalFallback: false,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    const done = act(async () => {
+      await result.current.persistRuntimeServerToProjectIfNeeded("rt-server");
+    });
+
+    expect(mockCreateServer).not.toHaveBeenCalled();
+
+    flatRef.current = [];
+    flushSync(() => {
+      rerender();
+    });
+
+    await done;
+
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips write when same-name saved server appears after waiting", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: undefined,
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: true,
+        hasSignedInUser: true,
+        isAuthLoading: false,
+        isLoadingProjects: false,
+        useLocalFallback: false,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    const done = act(async () => {
+      const out = await result.current.persistRuntimeServerToProjectIfNeeded(
+        "rt-server"
+      );
+      expect(out).toBe("skipped_existing_name");
+    });
+
+    flatRef.current = [{ _id: "existing", name: "rt-server" }];
+    flushSync(() => {
+      rerender();
+    });
+
+    await done;
+    expect(mockCreateServer).not.toHaveBeenCalled();
+  });
+
+  it("clears pending key on failed mutation", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: [],
+    };
+
+    mockCreateServer.mockResolvedValueOnce(undefined);
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: true,
+        hasSignedInUser: true,
+        isAuthLoading: false,
+        isLoadingProjects: false,
+        useLocalFallback: false,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    await act(async () => {
+      expect(
+        await result.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("failed");
+    });
+
+    mockCreateServer.mockReset();
+    mockCreateServer.mockImplementation(async () => {
+      flatRef.current = [{ _id: "n2", name: "rt-server" }];
+      flushSync(() => {
+        rerender();
+      });
+      return "n2";
+    });
+
+    await act(async () => {
+      expect(
+        await result.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("persisted");
+    });
+
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears pending key when Convex echo lands", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: [],
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: true,
+        hasSignedInUser: true,
+        isAuthLoading: false,
+        isLoadingProjects: false,
+        useLocalFallback: false,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    mockCreateServer.mockImplementation(async () => {
+      flatRef.current = [{ _id: "echo", name: "rt-server" }];
+      flushSync(() => {
+        rerender();
+      });
+      return "echo";
+    });
+
+    await act(async () => {
+      expect(
+        await result.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+      ).toBe("persisted");
+    });
+
+    await act(async () => {
+      const followUp =
+        await result.current.persistRuntimeServerToProjectIfNeeded("rt-server");
+      expect(followUp).toBe("skipped_existing_name");
+    });
+  });
+
+  it("dedupes repeated calls while first persist is in flight", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: [],
+    };
+    let resolveCreate!: (v: string) => void;
+    mockCreateServer.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveCreate = resolve;
+        })
+    );
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: true,
+        hasSignedInUser: true,
+        isAuthLoading: false,
+        isLoadingProjects: false,
+        useLocalFallback: false,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: "proj_cloud",
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    const p1 = act(async () =>
+      result.current.persistRuntimeServerToProjectIfNeeded("rt-server")
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      const second = await result.current.persistRuntimeServerToProjectIfNeeded(
+        "rt-server"
+      );
+      expect(second).toBe("pending");
+    });
+
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
+
+    resolveCreate!("srv1");
+    flatRef.current = [{ _id: "srv1", name: "rt-server" }];
+    flushSync(() => {
+      rerender();
+    });
+
+    await act(async () => {
+      await p1;
+    });
+    await act(async () => {
+      const again = await result.current.persistRuntimeServerToProjectIfNeeded(
+        "rt-server"
+      );
+      expect(again).toBe("skipped_existing_name");
+    });
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for auth and project readiness before persisting", async () => {
+    const dispatch = vi.fn();
+    const appState = buildCloudPersistState();
+    const flatRef: { current: { _id: string; name: string }[] | undefined } = {
+      current: undefined,
+    };
+
+    const readiness = {
+      isAuthenticated: false,
+      hasSignedInUser: true,
+      isAuthLoading: true,
+      isLoadingProjects: true,
+      useLocalFallback: false,
+      effectiveActiveProjectId: "none",
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useServerState({
+        appState,
+        dispatch,
+        isLoading: false,
+        isAuthenticated: readiness.isAuthenticated,
+        hasSignedInUser: readiness.hasSignedInUser,
+        isAuthLoading: readiness.isAuthLoading,
+        isLoadingProjects: readiness.isLoadingProjects,
+        useLocalFallback: readiness.useLocalFallback,
+        effectiveProjects: appState.projects,
+        effectiveActiveProjectId: readiness.effectiveActiveProjectId,
+        activeProjectServersFlat: flatRef.current,
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+      })
+    );
+
+    flushSync(() => {
+      rerender();
+    });
+
+    mockCreateServer.mockImplementation(async () => {
+      flatRef.current = [{ _id: "late_srv", name: "rt-server" }];
+      flushSync(() => {
+        rerender();
+      });
+      return "late_srv";
+    });
+
+    const done = act(async () => {
+      const out = await result.current.persistRuntimeServerToProjectIfNeeded(
+        "rt-server"
+      );
+      expect(out).toBe("persisted");
+    });
+
+    expect(mockCreateServer).not.toHaveBeenCalled();
+
+    readiness.isAuthenticated = true;
+    readiness.isAuthLoading = false;
+    readiness.isLoadingProjects = false;
+    readiness.effectiveActiveProjectId = "proj_cloud";
+    flatRef.current = [];
+    flushSync(() => {
+      rerender();
+    });
+
+    await done;
+
+    expect(mockCreateServer).toHaveBeenCalledTimes(1);
   });
 });

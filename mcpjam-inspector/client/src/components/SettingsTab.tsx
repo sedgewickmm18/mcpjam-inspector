@@ -1,7 +1,6 @@
-
 import { useAiProviderKeys } from "@/hooks/use-ai-provider-keys";
 import { useCustomProviders } from "@/hooks/use-custom-providers";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ProviderConfigDialog } from "./setting/ProviderConfigDialog";
 import { OllamaConfigDialog } from "./setting/OllamaConfigDialog";
 import { CustomProviderConfigDialog } from "./setting/CustomProviderConfigDialog";
@@ -14,7 +13,7 @@ import { Switch } from "@mcpjam/design-system/switch";
 import { Button } from "@mcpjam/design-system/button";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 import { updateThemeMode } from "@/lib/theme-utils";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Info } from "lucide-react";
 import { HOSTED_MODE } from "@/lib/config";
 import {
   setDefaultModel as setDefaultModelHelper,
@@ -37,7 +36,15 @@ interface ProviderConfig {
   getApiKeyUrl: string;
 }
 
-export function SettingsTab() {
+interface SettingsTabProps {
+  activeOrganizationId?: string;
+  onNavigate?: (section: string) => void;
+}
+
+export function SettingsTab({
+  activeOrganizationId,
+  onNavigate,
+}: SettingsTabProps = {}) {
   const themeMode = usePreferencesStore((s) => s.themeMode);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
   const {
@@ -58,6 +65,10 @@ export function SettingsTab() {
     updateCustomProvider,
     removeCustomProvider,
   } = useCustomProviders();
+
+  // When the user is in an org-backed context, LLM provider configuration is
+  // managed at the organization level, not per-user in local storage.
+  const isOrgBacked = !!activeOrganizationId;
 
   const [editingValue, setEditingValue] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -181,20 +192,6 @@ export function SettingsTab() {
     },
   ];
 
-  // Build available models for default model selector
-  const availableModels = buildAvailableModels({
-    hasToken,
-    getOpenRouterSelectedModels,
-    isOllamaRunning: false, // Ollama models not shown in settings
-    ollamaModels: [],
-    getAzureBaseUrl,
-    customProviders,
-  });
-
-  const [selectedDefaultModelId, setSelectedDefaultModelId] = useState<string | null>(() => {
-    return getConfiguredDefaultModelId();
-  });
-
   const handleEdit = (providerId: string) => {
     const provider = providerConfigs.find((p) => p.id === providerId);
     if (provider) {
@@ -280,6 +277,26 @@ export function SettingsTab() {
     setEditingCustomProviderIndex(null);
   };
 
+  // Build available models for default model selector
+  const availableModels = buildAvailableModels({
+    hasToken,
+    getOpenRouterSelectedModels,
+    isOllamaRunning: false, // Ollama models not shown in settings
+    ollamaModels: [],
+    getAzureBaseUrl,
+    customProviders,
+  });
+
+  const [selectedDefaultModelId, setSelectedDefaultModelId] = useState<string | null>(null);
+
+  // Load the stored default model ID after mount to avoid SSR issues
+  useEffect(() => {
+    const storedId = getConfiguredDefaultModelId();
+    if (storedId) {
+      setSelectedDefaultModelId(storedId);
+    }
+  }, []);
+
   const handleDefaultModelChange = (modelId: string) => {
     setSelectedDefaultModelId(modelId);
     setDefaultModelHelper(modelId);
@@ -351,7 +368,31 @@ export function SettingsTab() {
           </div>
         </SettingsSection>
 
-        {!HOSTED_MODE && (
+        {!HOSTED_MODE && isOrgBacked && (
+          <SettingsSection title="LLM Providers">
+            <div className="flex items-start gap-3 px-4 py-3 rounded-md border border-border/40 bg-muted/30">
+              <Info className="size-4 mt-0.5 shrink-0 text-muted-foreground" />
+              <div className="flex flex-col gap-1">
+                <span className="text-sm text-muted-foreground">
+                  Model providers are managed in your organization settings.
+                </span>
+                <Button
+                  variant="link"
+                  className="h-auto p-0 text-sm justify-start"
+                  onClick={() =>
+                    onNavigate?.(
+                      `organizations/${activeOrganizationId}/models`,
+                    )
+                  }
+                >
+                  Go to Organization Models
+                </Button>
+              </div>
+            </div>
+          </SettingsSection>
+        )}
+
+        {!HOSTED_MODE && !isOrgBacked && (
           <>
             {/* LLM Providers */}
             <SettingsSection title="LLM Providers">

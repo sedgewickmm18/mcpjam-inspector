@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { generateId } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatSession } from "../use-chat-session";
 import { useTrafficLogStore } from "@/stores/traffic-log-store";
@@ -66,6 +67,11 @@ const allowedOpenAiModel = {
   name: "GPT-4o Mini",
   provider: "openai" as const,
 };
+const orgOpenAiModel = {
+  id: "gpt-4o-mini",
+  name: "GPT-4o Mini",
+  provider: "openai" as const,
+};
 const gatedOpenAiModel = {
   id: "openai/gpt-5.4-pro",
   name: "GPT-5.4 Pro",
@@ -86,6 +92,12 @@ vi.mock("@/components/chat-v2/shared/model-helpers", () => ({
     gatedAnthropicModel,
     gatedGoogleModel,
     gatedOpenAiModel,
+    allowedHostedModel,
+    allowedOpenAiModel,
+    guestModel,
+  ]),
+  buildAvailableModelsFromOrgConfig: vi.fn(() => [
+    orgOpenAiModel,
     allowedHostedModel,
     allowedOpenAiModel,
     guestModel,
@@ -258,6 +270,7 @@ describe("useChatSession hosted mode", () => {
     mockState.convexAuth.isLoading = false;
     mockState.authFetch.mockReset();
     mockState.authFetch.mockResolvedValue(new Response(null, { status: 200 }));
+    mockState.setMessages.mockReset();
     mockState.buildHostedServerRequest.mockReset();
     mockState.getAccessToken.mockReset();
     mockState.getAccessToken.mockResolvedValue("access-token");
@@ -265,6 +278,8 @@ describe("useChatSession hosted mode", () => {
     mockState.getGuestBearerToken.mockResolvedValue("guest-token");
     mockState.selectedModelId = "anthropic/claude-haiku-4.5";
     mockState.latestOnData = undefined;
+    vi.mocked(generateId).mockReset();
+    vi.mocked(generateId).mockReturnValue("chat-session-id");
     useTrafficLogStore.getState().clear();
   });
 
@@ -273,7 +288,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           shareToken: "share-token",
         },
@@ -283,7 +298,7 @@ describe("useChatSession hosted mode", () => {
     const body = lastTransportOptions.body();
     expect(result.current.chatSessionId).toBe("chat-session-id");
     expect(body).toMatchObject({
-      workspaceId: "workspace-1",
+      projectId: "project-1",
       chatSessionId: "chat-session-id",
       selectedServerIds: ["server-id-1"],
       selectedServerNames: ["server-1"],
@@ -298,7 +313,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           chatboxToken: "chatbox-token",
           oauthTokens: {
@@ -311,7 +326,7 @@ describe("useChatSession hosted mode", () => {
     const body = lastTransportOptions.body();
     expect(result.current.chatSessionId).toBe("chat-session-id");
     expect(body).toMatchObject({
-      workspaceId: "workspace-1",
+      projectId: "project-1",
       chatSessionId: "chat-session-id",
       selectedServerIds: ["server-id-1"],
       selectedServerNames: ["server-1"],
@@ -327,7 +342,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           chatboxToken: "chatbox-token",
           chatboxSurface: "preview",
@@ -343,6 +358,95 @@ describe("useChatSession hosted mode", () => {
     unmount();
   });
 
+  it("uses organization provider config to expose BYOK hosted models", async () => {
+    mockState.selectedModelId = "gpt-4o-mini";
+
+    const { result, unmount } = renderHook(() =>
+      useChatSession({
+        selectedServers: ["server-1"],
+        hostedOrgModelConfig: {
+          providers: [
+            {
+              providerKey: "openai",
+              enabled: true,
+              hasSecret: true,
+            },
+          ],
+        },
+        hostedContext: {
+          projectId: "project-1",
+          selectedServerIds: ["server-id-1"],
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.availableModels.map((model) => model.id)).toContain(
+        "gpt-4o-mini",
+      );
+    });
+    expect(result.current.selectedModel.id).toBe("gpt-4o-mini");
+    expect(result.current.isMcpJamModel).toBe(false);
+    unmount();
+  });
+
+  it("resets the thread when the hosted scope changes under the same auth header", async () => {
+    vi.mocked(generateId)
+      .mockImplementationOnce(() => "chat-session-id")
+      .mockImplementation(() => "chat-session-id-2");
+    const onReset = vi.fn();
+
+    const { result, rerender } = renderHook(
+      ({
+        hostedContext,
+      }: {
+        hostedContext: {
+          projectId: string;
+          selectedServerIds: string[];
+          shareToken: string;
+        };
+      }) =>
+        useChatSession({
+          selectedServers: ["server-1"],
+          hostedContext,
+          onReset,
+        }),
+      {
+        initialProps: {
+          hostedContext: {
+            projectId: "project-1",
+            selectedServerIds: ["server-id-1"],
+            shareToken: "share-token-1",
+          },
+        },
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSessionBootstrapComplete).toBe(true);
+    });
+
+    expect(result.current.chatSessionId).toBe("chat-session-id");
+
+    mockState.setMessages.mockClear();
+    onReset.mockClear();
+
+    rerender({
+      hostedContext: {
+        projectId: "project-2",
+        selectedServerIds: ["server-id-2"],
+        shareToken: "share-token-2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(result.current.chatSessionId).toBe("chat-session-id-2");
+    });
+
+    expect(mockState.setMessages).toHaveBeenCalledTimes(1);
+    expect(onReset).toHaveBeenCalledWith("auth-bootstrap");
+  });
+
   it("marks session bootstrap complete only after auth setup finishes", async () => {
     let resolveAccessToken: (value: string) => void = () => {};
     mockState.getAccessToken.mockImplementation(
@@ -356,7 +460,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
         },
       })
@@ -416,7 +520,7 @@ describe("useChatSession hosted mode", () => {
         useChatSession({
           selectedServers,
           hostedContext: {
-            workspaceId: "workspace-1",
+            projectId: "project-1",
             selectedServerIds: hostedSelectedServerIds,
           },
         }),
@@ -637,7 +741,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
         },
       })
@@ -669,7 +773,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
         },
       })
@@ -712,7 +816,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           shareToken: "share-token",
         },
@@ -782,7 +886,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           shareToken: "share-token",
         },
@@ -804,7 +908,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           shareToken: "share-token",
         },
@@ -834,7 +938,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
         },
       })
@@ -894,7 +998,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
         },
       })
@@ -939,7 +1043,7 @@ describe("useChatSession hosted mode", () => {
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
-          workspaceId: "workspace-1",
+          projectId: "project-1",
           selectedServerIds: ["server-id-1"],
           shareToken: "share-token",
         },
