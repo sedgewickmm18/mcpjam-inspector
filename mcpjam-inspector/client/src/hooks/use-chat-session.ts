@@ -950,7 +950,11 @@ export function useChatSession({
   const initialTemperature = executionConfig?.temperature ?? 0.7;
   const initialRequireToolApproval =
     executionConfig?.requireToolApproval ?? false;
-  const { getAccessToken } = useAuth();
+  const {
+    getAccessToken,
+    user: workOsUser,
+    isLoading: isWorkOsLoading,
+  } = useAuth();
 
   // Store onReset in a ref to avoid triggering effects when the callback changes identity
   const onResetRef = useRef(onReset);
@@ -1065,15 +1069,11 @@ export function useChatSession({
   );
   const requireToolApprovalRef = useRef(requireToolApproval);
   requireToolApprovalRef.current = requireToolApproval;
+  const isHostedGuest = HOSTED_MODE && !workOsUser && !isWorkOsLoading;
   const directGuestMode =
-    HOSTED_MODE &&
-    !isAuthenticated &&
-    !isAuthLoading &&
-    !hostedProjectId &&
-    !hostedShareToken;
+    isHostedGuest && !isAuthLoading && !hostedProjectId && !hostedShareToken;
   const sharedGuestMode =
-    HOSTED_MODE &&
-    !isAuthenticated &&
+    isHostedGuest &&
     !isAuthLoading &&
     !!hostedProjectId &&
     !!(hostedShareToken || hostedChatboxToken);
@@ -1954,9 +1954,8 @@ export function useChatSession({
       } else if (
         !resolved &&
         active &&
-        !isAuthenticated &&
         HOSTED_MODE &&
-        (!hostedProjectId || !!hostedShareToken || !!hostedChatboxToken)
+        isHostedGuest
       ) {
         const guestToken = await getGuestBearerToken();
         if (!active) return;
@@ -2023,6 +2022,8 @@ export function useChatSession({
     hostedChatboxToken,
     hostedProjectId,
     isAuthenticated,
+    isHostedGuest,
+    workOsUser,
     clearPendingSessionHydration,
     setMessages,
     syncResumedVersion,
