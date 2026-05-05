@@ -16,7 +16,7 @@ import {
   Save,
 } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { Button } from "@mcpjam/design-system/button";
 import { Card } from "@mcpjam/design-system/card";
 import {

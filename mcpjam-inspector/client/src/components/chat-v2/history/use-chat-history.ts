@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "@/lib/use-convex";
 import {
   listChatHistory,
   chatHistoryAction,

@@ -29,8 +29,8 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
   type ModelMessage,
 } from "ai";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 import {
   ModelDefinition,
   type ModelProvider,

@@ -1,5 +1,5 @@
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +30,12 @@ import { HOSTED_MODE } from "@/lib/config";
 import { SidebarCreditUsage } from "@/components/sidebar/sidebar-credit-usage";
 
 export function SidebarUser() {
+  // In local mode, don't render this component at all
+  // It requires Convex queries that will fail
+  if (!HOSTED_MODE) {
+    return null;
+  }
+
   const { isLoading, isAuthenticated: _isAuthenticated } = useConvexAuth();
   const { user, signIn, signOut } = useAuth();
   const { profilePictureUrl } = useProfilePicture();

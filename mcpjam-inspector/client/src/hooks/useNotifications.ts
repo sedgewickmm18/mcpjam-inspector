@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation } from "@/lib/use-convex";
 
 export type NotificationType =
   | "project_added"

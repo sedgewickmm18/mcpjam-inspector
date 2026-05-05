@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Users } from "lucide-react";
 import { Button } from "@mcpjam/design-system/button";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 import { ShareProjectDialog } from "./ShareProjectDialog";
 import { usePostHog } from "posthog-js/react";
 import { detectEnvironment, detectPlatform } from "@/lib/PosthogUtils";

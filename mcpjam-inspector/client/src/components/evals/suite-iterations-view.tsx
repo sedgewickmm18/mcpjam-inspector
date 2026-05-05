@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
-import { useMutation } from "convex/react";
+import { useMutation } from "@/lib/use-convex";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { SuiteHeader } from "./suite-header";

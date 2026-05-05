@@ -7,8 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@mcpjam/design-system/dialog";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 import { useFeatureFlagEnabled } from "posthog-js/react";
 import { useEffect } from "react";
 import { useOrganizationQueries } from "@/hooks/useOrganizations";

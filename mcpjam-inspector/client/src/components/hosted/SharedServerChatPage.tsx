@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useConvexAuth } from "convex/react";
+import { useMutation, useConvexAuth } from "@/lib/use-convex";
 import { ConvexError } from "convex/values";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useAuth } from "@/lib/use-auth";
 import { Loader2, Link2Off, ShieldX } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@mcpjam/design-system/button";

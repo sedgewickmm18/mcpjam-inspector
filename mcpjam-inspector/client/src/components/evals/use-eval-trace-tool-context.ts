@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import {
   listTools,
   type ListToolsResultWithMetadata,

@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation } from "@/lib/use-convex";
 import type { EvalSuiteRun } from "./types";
 
 export type InsightStatus = "pending" | "completed" | "failed" | undefined;

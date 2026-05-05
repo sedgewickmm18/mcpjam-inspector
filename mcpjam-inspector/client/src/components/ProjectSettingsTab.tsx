@@ -1,5 +1,5 @@
-import { useConvexAuth } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useConvexAuth } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import { EditableText } from "./ui/editable-text";
 import { AccountApiKeySection } from "./setting/AccountApiKeySection";
 import { ProjectSlackIntegrationSection } from "./setting/ProjectSlackIntegrationSection";

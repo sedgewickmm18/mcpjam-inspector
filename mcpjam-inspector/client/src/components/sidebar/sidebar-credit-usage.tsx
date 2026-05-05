@@ -3,6 +3,7 @@ import { Skeleton } from "@mcpjam/design-system/skeleton";
 import { useCreditBalance } from "@/hooks/useCreditBalance";
 import { formatCreditResetText } from "@/lib/credit-usage";
 import { cn } from "@/lib/utils";
+import { HOSTED_MODE } from "@/lib/config";
 
 interface SidebarCreditUsageProps {
   className?: string;
@@ -15,6 +16,12 @@ export function SidebarCreditUsage({
   includeGuests = false,
   variant = "strip",
 }: SidebarCreditUsageProps = {}) {
+  // In local mode, don't render this component at all
+  // It requires Convex queries that will fail
+  if (!HOSTED_MODE) {
+    return null;
+  }
+
   const { balance, isLoading, isAuthenticated } = useCreditBalance({
     includeGuests,
   });

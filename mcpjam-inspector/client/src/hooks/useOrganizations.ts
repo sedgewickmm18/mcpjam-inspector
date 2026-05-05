@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
+import { useQuery, useMutation, useAction } from "@/lib/use-convex";
 
 export type OrganizationMembershipRole = "owner" | "admin" | "member" | "guest";
 

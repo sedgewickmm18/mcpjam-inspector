@@ -25,8 +25,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@mcpjam/design-system/tooltip";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useConvexAuth, useMutation, useQuery } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import { usePostHog } from "posthog-js/react";
 import { detectEnvironment, detectPlatform } from "@/lib/PosthogUtils";
 

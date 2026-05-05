@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useConvex, useQuery } from "convex/react";
+import { useConvex, useQuery } from "@/lib/use-convex";
 import posthog from "posthog-js";
 import { Loader2, Play, Puzzle, Trash2 } from "lucide-react";
 import { toast } from "sonner";

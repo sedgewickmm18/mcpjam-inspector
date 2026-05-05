@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useAuth } from "@/lib/use-auth";
 import { forceRefreshGuestSession, getGuestBearerToken } from "@/lib/guest-session";
 
 type GuestCapableConvexClient = {

@@ -4,15 +4,24 @@ import App from "./App.jsx";
 import "./index.css";
 import { getPostHogKey, getPostHogOptions } from "./lib/PosthogUtils.js";
 import { PostHogProvider } from "posthog-js/react";
-import { AuthKitProvider } from "@workos-inc/authkit-react";
-import { ConvexReactClient } from "convex/react";
+import { HOSTED_MODE } from "./lib/config";
 import { ConvexProviderWithAuthKit } from "@convex-dev/workos";
 import { initSentry } from "./lib/sentry.js";
 import { IframeRouterError } from "./components/IframeRouterError.jsx";
 import { initializeSessionToken } from "./lib/session-token.js";
-import { HOSTED_MODE } from "./lib/config";
 import { useUnifiedConvexAuth } from "./lib/unified-convex-auth";
+import { useLocalOnlyAuth } from "./lib/local-only-auth";
 import { getRuntimeConvexUrl } from "./lib/runtime-config";
+import { NullAuthKitProvider } from "./lib/null-authkit-provider";
+import { NullConvexProvider } from "./lib/null-convex-provider";
+
+// Only import ConvexReactClient and AuthKitProvider in hosted mode
+let ConvexReactClient: any;
+let AuthKitProvider: any;
+if (HOSTED_MODE) {
+  ConvexReactClient = require("convex/react").ConvexReactClient;
+  AuthKitProvider = require("@workos-inc/authkit-react").AuthKitProvider;
+}
 
 // Initialize Sentry before React mounts
 initSentry();
@@ -136,19 +145,34 @@ if (isInIframe) {
     };
   })();
 
-  const convex = new ConvexReactClient(convexUrl);
+  // Only create Convex client in hosted mode
+  const convex = HOSTED_MODE ? new ConvexReactClient(convexUrl) : null;
 
-  const Providers = (
+  // In local mode, use null providers that make no network requests.
+  // In hosted mode, use full WorkOS + Convex authentication.
+  const authMode = HOSTED_MODE ? "Real providers (hosted mode)" : "Null providers (local mode)";
+  console.log("[main] Using auth adapter:", authMode, "(HOSTED_MODE:", HOSTED_MODE + ")");
+  
+  const Providers = HOSTED_MODE && convex ? (
     <AuthKitProvider
       clientId={workosClientId}
       redirectUri={workosRedirectUri}
       devMode={workosDevMode}
       {...workosClientOptions}
     >
-      <ConvexProviderWithAuthKit client={convex} useAuth={useUnifiedConvexAuth}>
+      <ConvexProviderWithAuthKit 
+        client={convex} 
+        useAuth={useUnifiedConvexAuth}
+      >
         <App />
       </ConvexProviderWithAuthKit>
     </AuthKitProvider>
+  ) : (
+    <NullAuthKitProvider>
+      <NullConvexProvider>
+        <App />
+      </NullConvexProvider>
+    </NullAuthKitProvider>
   );
 
   // Async bootstrap to initialize session token before rendering

@@ -1,4 +1,7 @@
-import { useConvexAuth, useQuery } from "convex/react";
+import {
+  useConvexAuth,
+  useQuery,
+} from "@/lib/use-convex";
 import {
   useCallback,
   useEffect,
@@ -8,7 +11,7 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useAuth } from "@/lib/use-auth";
 import { AlertTriangle, Construction, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { MCPJamLimitDialog } from "./components/mcpjam-limit-dialog";

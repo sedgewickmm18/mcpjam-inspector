@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch } from "react";
-import { useConvex } from "convex/react";
+import { useConvex } from "@/lib/use-convex";
 import { toast } from "sonner";
 import type { HttpServerConfig, MCPServerConfig } from "@mcpjam/sdk/browser";
 import type {

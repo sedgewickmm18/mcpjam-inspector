@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { useLogger } from "./use-logger";
 import {
   initialAppState,

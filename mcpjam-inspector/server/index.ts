@@ -212,13 +212,14 @@ warnOnConvexDevMisconfiguration(loadedEnv);
 generateSessionToken();
 initXAAIdpKeyPair();
 
-startGuestAuthProvisioningInBackground();
-
 // Initialize SQLite database if in local mode (no Convex)
 if (initializeSqlite()) {
   appLogger.info("📦 Running in local persistence mode (SQLite)");
 } else {
   appLogger.info("☁️ Running in cloud persistence mode (Convex)");
+  // Only start guest auth provisioning in Convex mode (hosted mode)
+  // In local mode (SQLite), we don't need Convex guest auth
+  startGuestAuthProvisioningInBackground();
 }
 const app = new Hono().onError((err, c) => {
   appLogger.error("Unhandled error:", err);

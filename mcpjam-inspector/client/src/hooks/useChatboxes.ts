@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "@/lib/use-convex";
 import type { ChatboxHostStyle } from "@/lib/chatbox-host-style";
 
 export type ChatboxMode = "any_signed_in_with_link" | "invited_only";

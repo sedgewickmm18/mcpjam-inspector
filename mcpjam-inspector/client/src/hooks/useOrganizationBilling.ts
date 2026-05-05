@@ -1,4 +1,4 @@
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "@/lib/use-convex";
 import { useCallback, useState } from "react";
 
 export type OrganizationPlan = "free" | "solo" | "team" | "enterprise";

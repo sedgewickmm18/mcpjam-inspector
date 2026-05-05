@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { usePostHog } from "posthog-js/react";
 import { Layers } from "lucide-react";
 import { toast } from "sonner";

@@ -1,5 +1,5 @@
 import { Bell, Building2, FolderKanban, Inbox } from "lucide-react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { Button } from "@mcpjam/design-system/button";
 import {
   Popover,

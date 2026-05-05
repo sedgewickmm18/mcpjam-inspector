@@ -9,8 +9,8 @@ import {
 } from "react";
 import type { UIMessage } from "ai";
 import { ScrollToBottomButton } from "@/components/chat-v2/shared/scroll-to-bottom-button";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
 import type { ContentBlock } from "@modelcontextprotocol/client";
 import { toast } from "sonner";
 import { ModelDefinition } from "@/shared/types";

@@ -1,4 +1,4 @@
-import { useAction, useQuery } from "convex/react";
+import { useAction, useQuery } from "@/lib/use-convex";
 import { useCallback, useMemo, useState } from "react";
 import { usePostHog } from "posthog-js/react";
 

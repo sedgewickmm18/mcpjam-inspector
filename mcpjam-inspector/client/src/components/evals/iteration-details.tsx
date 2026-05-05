@@ -1,4 +1,4 @@
-import { useAction } from "convex/react";
+import { useAction } from "@/lib/use-convex";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EvalIteration, EvalCase } from "./types";
 import { TraceViewer } from "./trace-viewer";

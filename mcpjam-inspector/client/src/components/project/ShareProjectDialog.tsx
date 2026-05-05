@@ -30,7 +30,7 @@ import {
   useProjectMutations,
   useProjectMembers,
 } from "@/hooks/useProjects";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { useProfilePicture } from "@/hooks/useProfilePicture";
 import { serializeServersForSharing } from "@/lib/project-serialization";
 import { useOrganizationBilling } from "@/hooks/useOrganizationBilling";

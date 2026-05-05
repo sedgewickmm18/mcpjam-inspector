@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import type { ChatboxSettings } from "@/hooks/useChatboxes";
 import { Button } from "@mcpjam/design-system/button";
 import {

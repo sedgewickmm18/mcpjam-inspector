@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 import type {
   OpenRouterModel,
   ModelMetadataResponse,

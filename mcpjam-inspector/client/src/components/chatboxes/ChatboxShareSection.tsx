@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Clock, Globe, Lock, Users } from "lucide-react";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 import { toast } from "sonner";
 import { useProfilePicture } from "@/hooks/useProfilePicture";
 import {

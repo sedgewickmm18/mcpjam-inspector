@@ -1,4 +1,4 @@
-import { useQuery } from "convex/react";
+import { useQuery } from "@/lib/use-convex";
 import type {
   ChatHistoryDetailSession,
   ChatHistoryWidgetSnapshot,

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { useConvexAuth } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useConvexAuth } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import { useFeatureFlagEnabled } from "posthog-js/react";
 import { Button } from "@mcpjam/design-system/button";
 import { Input } from "@mcpjam/design-system/input";

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { useConvexAuth } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useConvexAuth } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:6274";
 

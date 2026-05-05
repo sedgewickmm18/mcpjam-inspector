@@ -21,7 +21,7 @@ import {
   useRef,
 } from "react";
 import { Braces, Loader2, Trash2 } from "lucide-react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useAuth } from "@/lib/use-auth";
 import type { ContentBlock } from "@modelcontextprotocol/client";
 import type { UIMessage } from "ai";
 import { toast } from "sonner";
@@ -83,7 +83,7 @@ import { useSharedAppState } from "@/state/app-state-context";
 import { Settings2 } from "lucide-react";
 import { ToolRenderOverride } from "@/components/chat-v2/thread/tool-render-overrides";
 import type { LoadingIndicatorVariant } from "@/components/chat-v2/shared/loading-indicator-content";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { useProjectServers } from "@/hooks/useViews";
 import { buildOAuthTokensByServerId } from "@/lib/oauth/oauth-tokens";
 import { useHostContextStore } from "@/stores/host-context-store";

@@ -1,5 +1,5 @@
-import { useAuth } from "@workos-inc/authkit-react";
-import { useQuery } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useQuery } from "@/lib/use-convex";
 
 /**
  * Centralized hook for getting the current user's profile picture URL.

@@ -73,7 +73,7 @@ import { LoggerView } from "./logger-view";
 import { useJsonRpcPanelVisibility } from "@/hooks/use-json-rpc-panel";
 import { Skeleton } from "@mcpjam/design-system/skeleton";
 import { ServersLoadingSkeleton } from "@mcpjam/design-system/servers-loading-skeleton";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { Project } from "@/state/app-types";
 import {
   clearPendingQuickConnect,

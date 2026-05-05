@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useQuery, useAction } from "convex/react";
+import { useQuery, useAction } from "@/lib/use-convex";
 
 export interface OrgModelProvider {
   providerKey: string;

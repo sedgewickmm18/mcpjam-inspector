@@ -1,4 +1,4 @@
-import type { ConvexReactClient } from "convex/react";
+import type { ConvexReactClient } from "@/lib/use-convex";
 import {
   generateEvalTests,
   type GeneratedEvalTestCase,

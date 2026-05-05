@@ -42,8 +42,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { useConvexAuth } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useConvexAuth } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 import { MCPIcon } from "@/components/ui/mcp-icon";
 import { SidebarUser } from "@/components/sidebar/sidebar-user";

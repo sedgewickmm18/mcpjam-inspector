@@ -6,8 +6,8 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useMutation, useQuery } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import posthog from "posthog-js";
 import {
   ArrowLeft,

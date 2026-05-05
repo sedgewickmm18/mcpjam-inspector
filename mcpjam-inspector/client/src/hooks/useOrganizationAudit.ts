@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConvex } from "convex/react";
+import { useConvex } from "@/lib/use-convex";
 
 const DEFAULT_LIMIT = 100;
 

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useAction, useMutation, useQuery } from "@/lib/use-convex";
 import { Button } from "@mcpjam/design-system/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@mcpjam/design-system/avatar";
 import { EditableText } from "@/components/ui/editable-text";

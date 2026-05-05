@@ -1,4 +1,4 @@
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import { useFeatureFlagEnabled } from "posthog-js/react";
 import {
   useOrganizationBilling,

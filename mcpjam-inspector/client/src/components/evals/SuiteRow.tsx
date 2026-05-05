@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
 import { RotateCw } from "lucide-react";
 import { Button } from "@mcpjam/design-system/button";
 import {

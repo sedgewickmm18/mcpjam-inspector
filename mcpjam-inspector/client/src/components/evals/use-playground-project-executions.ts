@@ -1,4 +1,4 @@
-import { useConvex } from "convex/react";
+import { useConvex } from "@/lib/use-convex";
 import { useEffect, useState } from "react";
 import type {
   EvalCase,

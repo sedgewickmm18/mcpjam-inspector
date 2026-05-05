@@ -59,8 +59,8 @@ import {
   createServerTunnel,
   getServerTunnel,
 } from "@/lib/apis/mcp-tunnels-api";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 import { HOSTED_MODE } from "@/lib/config";
 import { ShareServerDialog } from "./ShareServerDialog";
 import { useExploreCasesPrefetchOnConnect } from "@/hooks/use-explore-cases-prefetch-on-connect";

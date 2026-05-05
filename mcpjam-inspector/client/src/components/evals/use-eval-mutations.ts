@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useMutation } from "convex/react";
+import { useMutation } from "@/lib/use-convex";
 
 /**
  * Hook for all eval mutations (delete, duplicate, cancel, etc.)

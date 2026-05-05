@@ -1,4 +1,4 @@
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
 import { useMemo } from "react";
 import { HOSTED_MODE } from "@/lib/config";
 

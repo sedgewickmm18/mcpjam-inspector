@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useConvexAuth } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useMutation, useConvexAuth } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import * as Sentry from "@sentry/react";
 import {
   getGuestPromotionProof,

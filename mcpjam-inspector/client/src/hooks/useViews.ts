@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation } from "@/lib/use-convex";
 
 // Type definitions matching backend
 export type ViewProtocol = "mcp-apps" | "openai-apps";

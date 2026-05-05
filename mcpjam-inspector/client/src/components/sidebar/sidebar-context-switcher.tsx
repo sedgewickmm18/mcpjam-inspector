@@ -33,7 +33,7 @@ import { LearnMoreHoverCard } from "@/components/learn-more/LearnMoreHoverCard";
 import { cn, getInitials } from "@/lib/utils";
 import { useProjectMembers } from "@/hooks/useProjects";
 import { useOrganizationQueries } from "@/hooks/useOrganizations";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth } from "@/lib/use-convex";
 import type { Project } from "@/state/app-types";
 import { resolveProjectIcon } from "@/components/project/ProjectEmojiPicker";
 import { CreateOrganizationDialog } from "@/components/organization/CreateOrganizationDialog";

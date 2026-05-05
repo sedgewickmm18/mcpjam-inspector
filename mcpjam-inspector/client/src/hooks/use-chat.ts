@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useAuth } from "@/lib/use-auth";
 import { usePostHog } from "posthog-js/react";
 import { standardEventProps } from "@/lib/PosthogUtils";
 import { ChatMessage, ChatState, Attachment } from "@/lib/types/chat-types";

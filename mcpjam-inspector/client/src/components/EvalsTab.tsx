@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvex, useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvex, useConvexAuth } from "@/lib/use-convex";
 import { FlaskConical, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import posthog from "posthog-js";

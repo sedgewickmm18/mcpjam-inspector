@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/lib/use-convex";
 import type {
   EvalSuiteOverviewEntry,
   SuiteDetailsQueryResponse,

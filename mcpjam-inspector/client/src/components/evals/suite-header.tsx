@@ -32,7 +32,7 @@ import {
   EvalCase,
   SuiteAggregate,
 } from "./types";
-import { useMutation } from "convex/react";
+import { useMutation } from "@/lib/use-convex";
 import { toast } from "sonner";
 
 import { isMCPJamProvidedModel } from "@/shared/types";

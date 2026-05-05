@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useState } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/lib/use-convex";
 import type { ClusterRunState } from "@/hooks/useUsageInsights";
 
 export type TopicMapCluster = {

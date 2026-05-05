@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useMutation } from "convex/react";
+import { useMutation } from "@/lib/use-convex";
 import type { UIMessage } from "@ai-sdk/react";
 import type { DisplayContext, WidgetCsp } from "./useViews";
 import { detectUIType, getUIResourceUri } from "@/lib/mcp-ui/mcp-apps-utils";

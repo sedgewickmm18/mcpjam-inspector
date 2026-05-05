@@ -1,5 +1,5 @@
-import { useAuth } from "@workos-inc/authkit-react";
-import { useConvexAuth } from "convex/react";
+import { useAuth } from "@/lib/use-auth";
+import { useConvexAuth } from "@/lib/use-convex";
 
 /**
  * True when the current session has no WorkOS/Convex identity and no project.

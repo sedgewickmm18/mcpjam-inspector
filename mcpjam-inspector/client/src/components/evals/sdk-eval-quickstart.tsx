@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
 import { Check, Copy, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useAuth } from "@workos-inc/authkit-react";
+import { useConvexAuth, useMutation, useQuery } from "@/lib/use-convex";
+import { useAuth } from "@/lib/use-auth";
 import { usePostHog } from "posthog-js/react";
 import { Button } from "@mcpjam/design-system/button";
 import { Input } from "@mcpjam/design-system/input";

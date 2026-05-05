@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation } from "@/lib/use-convex";
 import type { ServerFormData } from "@/shared/types.js";
 import type { RegistryServer } from "@/lib/registry-server-types";
 import {

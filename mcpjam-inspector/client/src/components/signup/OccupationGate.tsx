@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation } from "@/lib/use-convex";
 import { usePostHog } from "posthog-js/react";
 import { ArrowRight, Check, Loader2 } from "lucide-react";
 import { Button } from "@mcpjam/design-system/button";
