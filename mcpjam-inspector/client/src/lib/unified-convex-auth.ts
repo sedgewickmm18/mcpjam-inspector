@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth as useWorkOSAuth } from "@workos-inc/authkit-react";
+import { NON_PROD_LOCKDOWN } from "@/lib/config";
 import {
   forceRefreshGuestSession,
   getCachedGuestSession,
@@ -68,6 +69,13 @@ export function useUnifiedConvexAuth() {
     if (guestToken && !getCachedGuestSession()?.token) {
       console.log("[UnifiedAuth] Restoring guest token from state (WorkOS refresh failed)");
       // Keep the existing guest token
+      return;
+    }
+    // Non-prod lockdown blocks guest sessions: the gate will show "logged-out"
+    // and any retry would just spam 403s. Settle as unauthenticated immediately.
+    if (NON_PROD_LOCKDOWN) {
+      setGuestToken(null);
+      setGuestLoading(false);
       return;
     }
 

@@ -22,7 +22,7 @@ export function SidebarCreditUsage({
     return null;
   }
 
-  const { balance, isLoading, isAuthenticated } = useCreditBalance({
+  const { balance, isLoading, hasWorkOsUser } = useCreditBalance({
     includeGuests,
   });
 
@@ -42,7 +42,7 @@ export function SidebarCreditUsage({
       : 0;
   const hasPaidHistory = balance?.hasPurchaseHistory === true;
   const showGuestUpgradeHint =
-    variant === "strip" && includeGuests && !isAuthenticated && !isLoading;
+    variant === "strip" && includeGuests && !hasWorkOsUser && !isLoading;
 
   return (
     <div
