@@ -1,13 +1,13 @@
 import { webPost } from "./base";
-import { buildHostedServerRequest } from "./context";
+import { buildServerRequest } from "./context";
 
 export type HostedServerValidateContext = {
   projectId: string;
   serverId: string;
   serverName?: string;
   accessScope?: "project_member" | "chat_v2";
-  shareToken?: string;
-  chatboxToken?: string;
+  chatboxId?: string;
+  accessVersion?: number;
 };
 
 export interface HostedServerValidateResponse {
@@ -24,7 +24,7 @@ export interface HostedServerOAuthRequirementResponse {
 export async function checkHostedServerOAuthRequirement(
   serverNameOrId: string
 ): Promise<HostedServerOAuthRequirementResponse> {
-  const request = buildHostedServerRequest(serverNameOrId);
+  const request = buildServerRequest(serverNameOrId);
   return webPost<typeof request, HostedServerOAuthRequirementResponse>(
     "/api/web/servers/check-oauth",
     request
@@ -47,14 +47,15 @@ export async function validateHostedServer(
         ...(hostedContext.accessScope
           ? { accessScope: hostedContext.accessScope }
           : {}),
-        ...(hostedContext.shareToken
-          ? { shareToken: hostedContext.shareToken }
+        ...(hostedContext.chatboxId
+          ? { chatboxId: hostedContext.chatboxId }
           : {}),
-        ...(hostedContext.chatboxToken
-          ? { chatboxToken: hostedContext.chatboxToken }
+        ...(hostedContext.chatboxId &&
+        Number.isFinite(hostedContext.accessVersion)
+          ? { accessVersion: hostedContext.accessVersion }
           : {}),
       }
-    : buildHostedServerRequest(serverNameOrId);
+    : buildServerRequest(serverNameOrId);
   // Prefer an explicit OAuth token (e.g. freshly obtained from the OAuth flow)
   // over the one stored in the hosted API context, which may be stale.
   if (oauthAccessToken) {

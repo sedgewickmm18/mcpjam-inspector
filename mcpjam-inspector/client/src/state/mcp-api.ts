@@ -4,8 +4,14 @@ import { authFetch } from "@/lib/session-token";
 import { HOSTED_MODE } from "@/lib/config";
 import {
   validateHostedServer,
+  type HostedServerValidateContext,
   type HostedServerValidateResponse,
 } from "@/lib/apis/web/servers-api";
+import {
+  getHostedChatboxAccessVersion,
+  getHostedChatboxId,
+  getHostedOAuthToken,
+} from "@/lib/apis/web/context";
 import { BootstrapNotReadyError } from "@/lib/app-ready";
 import type { ConnectionDefaults } from "@/shared/connection-defaults";
 
@@ -45,16 +51,40 @@ function normalizeHostedValidationError(error: unknown): string {
   return "Hosted validation failed";
 }
 
+function buildHostedValidationContext(
+  serverId: string,
+  options?: {
+    projectId?: string;
+    serverName?: string;
+  },
+): HostedServerValidateContext | undefined {
+  if (!options?.projectId) return undefined;
+
+  const chatboxId = getHostedChatboxId();
+  return {
+    projectId: options.projectId,
+    serverId,
+    ...(options.serverName ? { serverName: options.serverName } : {}),
+    ...(chatboxId ? { accessScope: "chat_v2" } : {}),
+    ...(chatboxId ? { chatboxId } : {}),
+    ...(chatboxId ? { accessVersion: getHostedChatboxAccessVersion() } : {}),
+  };
+}
+
 async function safeValidateHostedServer(
   serverId: string,
   serverConfig: MCPServerConfig,
+  hostedContext?: HostedServerValidateContext,
 ): Promise<HostedServerValidateResponse & { error?: string }> {
   try {
+    const oauthToken =
+      extractOAuthToken(serverConfig) ?? getHostedOAuthToken(serverId);
     return await withTimeout(
       validateHostedServer(
         serverId,
-        extractOAuthToken(serverConfig),
+        oauthToken,
         serverConfig.capabilities as Record<string, unknown> | undefined,
+        hostedContext,
       ),
       HOSTED_VALIDATE_TIMEOUT_MS,
     );
@@ -86,7 +116,9 @@ async function authFetchWithTimeout(
     clearTimeout(timeoutId);
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(
-        `Connection attempt timed out after ${timeoutMs / 1000} seconds. The server may not exist or is not responding.`,
+        `Connection attempt timed out after ${
+          timeoutMs / 1000
+        } seconds. The server may not exist or is not responding.`,
       );
     }
     throw error;
@@ -101,7 +133,9 @@ async function withTimeout<T>(
     const timeoutId = window.setTimeout(() => {
       reject(
         new Error(
-          `Connection attempt timed out after ${timeoutMs / 1000} seconds. The server may not exist or is not responding.`,
+          `Connection attempt timed out after ${
+            timeoutMs / 1000
+          } seconds. The server may not exist or is not responding.`,
         ),
       );
     }, timeoutMs);
@@ -118,7 +152,6 @@ async function withTimeout<T>(
     );
   });
 }
-
 
 function buildResolverBody(
   serverId: string,
@@ -138,31 +171,6 @@ function buildResolverBody(
   };
 }
 
-/**
- * Local OAuth tokens currently live in localStorage (the local OAuth provider
- * has not been moved to Convex), but the resolver path expects Convex to
- * supply `oauthAccessToken` and rejects `useOAuth` servers without one. To
- * avoid breaking synced local OAuth servers, fall back to the legacy
- * `{serverConfig, serverId}` body whenever the runtime config carries a local
- * `Authorization: Bearer …` header. The legacy path forwards the header
- * straight through to the spawned client.
- */
-function hasLocalOAuthBearer(serverConfig: MCPServerConfig): boolean {
-  const headers = (serverConfig as { requestInit?: { headers?: unknown } })
-    ?.requestInit?.headers;
-  if (!headers || typeof headers !== "object") return false;
-  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
-    if (
-      key.toLowerCase() === "authorization" &&
-      typeof value === "string" &&
-      value.toLowerCase().startsWith("bearer ")
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export async function testConnection(
   serverConfig: MCPServerConfig,
   serverId: string,
@@ -173,29 +181,24 @@ export async function testConnection(
   },
 ) {
   if (HOSTED_MODE) {
-    return safeValidateHostedServer(serverId, serverConfig);
+    return safeValidateHostedServer(
+      serverId,
+      serverConfig,
+      buildHostedValidationContext(serverId, options),
+    );
   }
 
-  // When projectId is provided, the server resolves config + tokens from
-  // Convex via /web/authorize-batch-local. Without it (or when the runtime
-  // serverConfig carries a local OAuth bearer that Convex doesn't yet hold),
-  // fall back to the legacy {serverConfig, serverId} body so the local token
-  // travels with the request.
-  const useResolver =
-    !!options?.projectId && !hasLocalOAuthBearer(serverConfig);
-  // The legacy server-side path uses `serverId` as the mcpClientManager key.
-  // When the caller resolved a Convex `_id` for the resolver path but we end
-  // up taking the legacy fallback (local OAuth bearer present), prefer the
-  // display name so the manager doesn't end up with a duplicate entry keyed
-  // by the Convex `_id` alongside the existing display-name entry.
-  const legacyServerId = options?.serverName ?? serverId;
-  const body: Record<string, unknown> = useResolver
-    ? buildResolverBody(serverId, {
-        projectId: options!.projectId!,
-        serverName: options?.serverName,
-        connectionDefaults: options?.connectionDefaults,
-      })
-    : { serverConfig, serverId: legacyServerId };
+  if (!options?.projectId) {
+    throw new Error(
+      "projectId is required for testConnection in local mode (server must be synced to Convex first)",
+    );
+  }
+
+  const body = buildResolverBody(serverId, {
+    projectId: options.projectId,
+    serverName: options.serverName,
+    connectionDefaults: options.connectionDefaults,
+  });
 
   const res = await authFetchWithTimeout(
     "/api/mcp/connect",
@@ -243,21 +246,24 @@ export async function reconnectServer(
   },
 ) {
   if (HOSTED_MODE) {
-    return safeValidateHostedServer(serverId, serverConfig);
+    return safeValidateHostedServer(
+      serverId,
+      serverConfig,
+      buildHostedValidationContext(serverId, options),
+    );
   }
 
-  const useResolver =
-    !!options?.projectId && !hasLocalOAuthBearer(serverConfig);
-  // See testConnection: prefer the display name for the legacy body so we
-  // don't create a phantom mcpClientManager entry keyed by the Convex `_id`.
-  const legacyServerId = options?.serverName ?? serverId;
-  const body: Record<string, unknown> = useResolver
-    ? buildResolverBody(serverId, {
-        projectId: options!.projectId!,
-        serverName: options?.serverName,
-        connectionDefaults: options?.connectionDefaults,
-      })
-    : { serverId: legacyServerId, serverConfig };
+  if (!options?.projectId) {
+    throw new Error(
+      "projectId is required for reconnectServer in local mode (server must be synced to Convex first)",
+    );
+  }
+
+  const body = buildResolverBody(serverId, {
+    projectId: options.projectId,
+    serverName: options.serverName,
+    connectionDefaults: options.connectionDefaults,
+  });
 
   const res = await authFetchWithTimeout(
     "/api/mcp/servers/reconnect",

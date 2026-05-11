@@ -3,7 +3,7 @@ import { isHostedMode, runByMode } from "@/lib/apis/mode-client";
 import { getSessionToken } from "@/lib/session-token";
 import {
   buildHostedEvalServerBatchRequest,
-  buildHostedServerBatchRequest,
+  buildServerBatchRequest,
 } from "@/lib/apis/web/context";
 import { listHostedTools } from "@/lib/apis/web/tools-api";
 import { authFetch } from "@/lib/session-token";
@@ -61,6 +61,13 @@ type RunEvalsRequest = EvalRequestWithServers & {
   passCriteria?: {
     minimumPassRate: number;
   };
+  /**
+   * True for suite reruns of already-persisted cases. Tells the server to
+   * skip the per-case upsert path so suite-default-derived wire fields
+   * (substituted models, merged advancedConfig) don't get baked into
+   * per-case overrides.
+   */
+  suiteRerun?: boolean;
 };
 
 type RunTestCaseRequest = EvalRequestWithServers & {
@@ -140,8 +147,8 @@ function mergeHostedServerBatch<
 >(
   request: T,
 ): Omit<T, "serverIds" | "convexAuthToken"> &
-  ReturnType<typeof buildHostedServerBatchRequest> {
-  const hostedBatch = buildHostedServerBatchRequest(request.serverIds);
+  ReturnType<typeof buildServerBatchRequest> {
+  const hostedBatch = buildServerBatchRequest(request.serverIds);
   const {
     convexAuthToken: _convexAuthToken,
     serverIds: _serverIds,

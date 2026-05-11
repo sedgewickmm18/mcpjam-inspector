@@ -1,33 +1,35 @@
 import { useLayoutEffect } from "react";
-import { setHostedApiContext } from "@/lib/apis/web/context";
+import { setApiContext } from "@/lib/apis/web/context";
 
-interface UseHostedApiContextOptions {
+interface UseApiContextOptions {
   projectId: string | null;
   serverIdsByName: Record<string, string>;
   clientCapabilities?: Record<string, unknown>;
   clientConfigSyncPending?: boolean;
   getAccessToken: () => Promise<string | undefined | null>;
   oauthTokensByServerId?: Record<string, string>;
-  shareToken?: string;
-  chatboxToken?: string;
+  // Resolved chatbox identity (post-redeem) — drives chatbox-aware request
+  // shaping inside the API context.
+  chatboxId?: string;
+  accessVersion?: number;
   isAuthenticated?: boolean;
   hasSession?: boolean;
   enabled?: boolean;
 }
 
-export function useHostedApiContext({
+export function useApiContext({
   projectId,
   serverIdsByName,
   clientCapabilities,
   clientConfigSyncPending,
   getAccessToken,
   oauthTokensByServerId,
-  shareToken,
-  chatboxToken,
+  chatboxId,
+  accessVersion,
   isAuthenticated,
   hasSession,
   enabled = true,
-}: UseHostedApiContextOptions): void {
+}: UseApiContextOptions): void {
   // useLayoutEffect so the global hosted context is set synchronously before
   // any child useEffect hooks fire (e.g. fetchToolsMetadata in useChatSession).
   // With useEffect, React's bottom-up ordering means child passive effects run
@@ -38,21 +40,21 @@ export function useHostedApiContext({
       return;
     }
 
-    setHostedApiContext({
+    setApiContext({
       projectId,
       serverIdsByName,
       clientCapabilities,
       clientConfigSyncPending,
       getAccessToken,
       oauthTokensByServerId,
-      shareToken,
-      chatboxToken,
+      chatboxId,
+      accessVersion,
       isAuthenticated,
       hasSession,
     });
 
     return () => {
-      setHostedApiContext(null);
+      setApiContext(null);
     };
   }, [
     enabled,
@@ -62,8 +64,8 @@ export function useHostedApiContext({
     clientConfigSyncPending,
     getAccessToken,
     oauthTokensByServerId,
-    shareToken,
-    chatboxToken,
+    chatboxId,
+    accessVersion,
     isAuthenticated,
     hasSession,
   ]);

@@ -3,119 +3,34 @@
     {
       "releases": [
         {
-          "name": "@mcpjam/sdk",
-          "type": "patch"
-        },
-        {
-          "name": "@mcpjam/cli",
-          "type": "patch"
-        },
-        {
           "name": "@mcpjam/inspector",
           "type": "patch"
         }
       ],
-      "summary": "Bump sdk, cli, and inspector",
-      "id": "bump-sdk-cli-inspector"
+      "summary": "Inspector rollup since the last release:\n\n- Chatbox auth: full migration to the org-scoped auth path.\n- Chatbox saves now write through the v2 host-config path; preview auto-connects configured MCP servers before the first turn so the model sees tools on turn one.\n- Chatbox NUX: first-run demo auto-seeds, and a fix for the \"return to index\" navigation after a lost onboarding session.\n- Project picker fetches all project servers in one bulk call with stale-while-revalidate, removing the per-project N+1 lookups when switching projects.\n- Sentry alert when a project create silently drops servers (regression guard).\n- Solo tier removed from the inspector UI and accompanying tests.\n- Local chat (unauthenticated chat session) wired up end-to-end.\n- 401 responses now consult the cached session before surfacing the error.\n- `useEnsureDbUser` hardened so genuine user-creation errors surface instead of being swallowed.",
+      "id": "inspector-rollup-post-phase4"
     },
     {
       "releases": [
         {
-          "name": "@mcpjam/sdk",
-          "type": "patch"
-        },
-        {
-          "name": "@mcpjam/cli",
-          "type": "patch"
-        },
-        {
           "name": "@mcpjam/inspector",
           "type": "patch"
         }
       ],
-      "summary": "Patch sdk, cli, and inspector",
-      "id": "oauth-conformance-fixes"
-    },
-    {
-      "releases": [
-        {
-          "name": "@mcpjam/sdk",
-          "type": "patch"
-        },
-        {
-          "name": "@mcpjam/cli",
-          "type": "patch"
-        },
-        {
-          "name": "@mcpjam/inspector",
-          "type": "patch"
-        }
-      ],
-      "summary": "Fix `oauth login` hanging ~95s after browser auth. The interactive callback server's `stop()` was using `server.closeIdleConnections()`, which does not drain the browser's favicon keep-alive socket. Switched to `closeAllConnections()`, which is safe here because `stop()` runs in `runOAuthLogin`'s `finally` block after the token exchange has returned.",
-      "id": "oauth-login-callback-server-close"
-    },
-    {
-      "releases": [
-        {
-          "name": "@mcpjam/sdk",
-          "type": "patch"
-        },
-        {
-          "name": "@mcpjam/cli",
-          "type": "patch"
-        },
-        {
-          "name": "@mcpjam/inspector",
-          "type": "patch"
-        }
-      ],
-      "summary": "Patch sdk, cli, and inspector",
-      "id": "patch-sdk-cli-inspector"
+      "summary": "Phase 4 HostConfig v2 write switch (inspector): connection settings now route through `hostConfigsV2.patchProjectDefaultConnection` instead of the legacy `projects.updateProjectClientConfig` (mutation completion is the durability signal — no project-doc echo round-trip). Eval suite settings replace \"Remove\" with \"Reset to project default\" which copies the current project default into the suite's owned `hostConfigId`. Chatbox builder draft loader migrates older sessionStorage drafts (missing fields filled from the blank starter) so persisted drafts from previous shapes don't crash the builder.",
+      "id": "phase-4-hostconfig-v2-write-switch"
     }
   ],
   "releases": [
     {
-      "name": "@mcpjam/sdk",
-      "type": "patch",
-      "oldVersion": "1.3.1",
-      "changesets": [
-        "bump-sdk-cli-inspector",
-        "oauth-conformance-fixes",
-        "oauth-login-callback-server-close",
-        "patch-sdk-cli-inspector"
-      ],
-      "newVersion": "1.3.2"
-    },
-    {
-      "name": "@mcpjam/cli",
-      "type": "patch",
-      "oldVersion": "3.3.3",
-      "changesets": [
-        "bump-sdk-cli-inspector",
-        "oauth-conformance-fixes",
-        "oauth-login-callback-server-close",
-        "patch-sdk-cli-inspector"
-      ],
-      "newVersion": "3.3.4"
-    },
-    {
       "name": "@mcpjam/inspector",
       "type": "patch",
-      "oldVersion": "2.4.3",
+      "oldVersion": "2.4.6",
       "changesets": [
-        "bump-sdk-cli-inspector",
-        "oauth-conformance-fixes",
-        "oauth-login-callback-server-close",
-        "patch-sdk-cli-inspector"
+        "inspector-rollup-post-phase4",
+        "phase-4-hostconfig-v2-write-switch"
       ],
-      "newVersion": "2.4.4"
-    },
-    {
-      "name": "@mcpjam/mcp",
-      "type": "none",
-      "oldVersion": "0.0.1",
-      "changesets": [],
-      "newVersion": "0.0.1"
+      "newVersion": "2.4.7"
     }
   ]
 }

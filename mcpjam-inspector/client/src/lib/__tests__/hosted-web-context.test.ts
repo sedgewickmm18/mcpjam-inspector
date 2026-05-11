@@ -8,9 +8,9 @@ vi.mock("../config", () => ({
 
 import {
   buildHostedEvalServerBatchRequest,
-  buildHostedServerBatchRequest,
-  buildHostedServerRequest,
-  setHostedApiContext,
+  buildServerBatchRequest,
+  buildServerRequest,
+  setApiContext,
 } from "../apis/web/context";
 
 describe("hosted web context", () => {
@@ -20,34 +20,37 @@ describe("hosted web context", () => {
   >;
 
   afterEach(() => {
-    setHostedApiContext(null);
+    setApiContext(null);
     localStorage.removeItem("mcp-tokens-myServer");
   });
 
-  it("includes share token and chat_v2 scope for shared-chat requests", () => {
-    setHostedApiContext({
+  it("includes chatbox id, accessVersion, and chat_v2 scope for chatbox requests", () => {
+    setApiContext({
       projectId: "ws_shared",
       serverIdsByName: { bench: "srv_bench" },
       getAccessToken: async () => null,
-      shareToken: "share_tok_123",
+      chatboxId: "cbx_123",
+      accessVersion: 7,
     });
 
-    expect(buildHostedServerRequest("bench")).toEqual({
+    expect(buildServerRequest("bench")).toEqual({
       projectId: "ws_shared",
       serverId: "srv_bench",
       serverName: "bench",
       clientCapabilities: defaultClientCapabilities,
       accessScope: "chat_v2",
-      shareToken: "share_tok_123",
+      chatboxId: "cbx_123",
+      accessVersion: 7,
     });
 
-    expect(buildHostedServerBatchRequest(["bench"])).toEqual({
+    expect(buildServerBatchRequest(["bench"])).toEqual({
       projectId: "ws_shared",
       serverIds: ["srv_bench"],
       serverNames: ["bench"],
       clientCapabilities: defaultClientCapabilities,
       accessScope: "chat_v2",
-      shareToken: "share_tok_123",
+      chatboxId: "cbx_123",
+      accessVersion: 7,
     });
 
     expect(buildHostedEvalServerBatchRequest(["bench"])).toEqual({
@@ -56,18 +59,53 @@ describe("hosted web context", () => {
       serverNames: ["bench"],
       clientCapabilities: defaultClientCapabilities,
       accessScope: "chat_v2",
-      shareToken: "share_tok_123",
+      chatboxId: "cbx_123",
+      accessVersion: 7,
     });
   });
 
-  it("omits share scope fields when no share token is present", () => {
-    setHostedApiContext({
+  it("omits accessVersion when chatboxId is absent", () => {
+    setApiContext({
+      projectId: "ws_regular",
+      serverIdsByName: { bench: "srv_bench" },
+      getAccessToken: async () => null,
+      // Stray accessVersion without chatboxId — never emitted on the wire.
+      accessVersion: 5,
+    });
+    expect(buildServerRequest("bench")).toEqual({
+      projectId: "ws_regular",
+      serverId: "srv_bench",
+      serverName: "bench",
+      clientCapabilities: defaultClientCapabilities,
+    });
+  });
+
+  it("rejects non-finite accessVersion even with chatboxId set", () => {
+    setApiContext({
+      projectId: "ws_shared",
+      serverIdsByName: { bench: "srv_bench" },
+      getAccessToken: async () => null,
+      chatboxId: "cbx_123",
+      accessVersion: Number.NaN,
+    });
+    expect(buildServerRequest("bench")).toEqual({
+      projectId: "ws_shared",
+      serverId: "srv_bench",
+      serverName: "bench",
+      clientCapabilities: defaultClientCapabilities,
+      accessScope: "chat_v2",
+      chatboxId: "cbx_123",
+    });
+  });
+
+  it("omits chatbox scope fields when no chatbox id is present", () => {
+    setApiContext({
       projectId: "ws_regular",
       serverIdsByName: { bench: "srv_bench" },
       getAccessToken: async () => null,
     });
 
-    expect(buildHostedServerRequest("bench")).toEqual({
+    expect(buildServerRequest("bench")).toEqual({
       projectId: "ws_regular",
       serverId: "srv_bench",
       serverName: "bench",
@@ -76,16 +114,16 @@ describe("hosted web context", () => {
   });
 
   it("throws BootstrapNotReadyError when projectId is missing", () => {
-    setHostedApiContext({
+    setApiContext({
       projectId: null,
       isAuthenticated: false,
       serverIdsByName: {},
     });
 
-    expect(() => buildHostedServerRequest("myServer")).toThrow(
+    expect(() => buildServerRequest("myServer")).toThrow(
       "hosted projectId is not in the API context yet",
     );
-    expect(() => buildHostedServerBatchRequest(["myServer"])).toThrow(
+    expect(() => buildServerBatchRequest(["myServer"])).toThrow(
       "hosted projectId is not in the API context yet",
     );
     expect(() => buildHostedEvalServerBatchRequest(["myServer"])).toThrow(
@@ -101,13 +139,13 @@ describe("hosted web context", () => {
       }),
     );
 
-    setHostedApiContext({
+    setApiContext({
       projectId: "ws_regular",
       isAuthenticated: false,
       serverIdsByName: { myServer: "srv_myServer" },
     });
 
-    expect(buildHostedServerRequest("myServer")).toEqual({
+    expect(buildServerRequest("myServer")).toEqual({
       projectId: "ws_regular",
       serverId: "srv_myServer",
       serverName: "myServer",
@@ -121,14 +159,14 @@ describe("hosted web context", () => {
       experimental: { inspectorProfile: true },
     } as Record<string, unknown>;
 
-    setHostedApiContext({
+    setApiContext({
       projectId: "ws_override",
       serverIdsByName: { bench: "srv_bench" },
       clientCapabilities,
       getAccessToken: async () => null,
     });
 
-    expect(buildHostedServerRequest("bench")).toEqual({
+    expect(buildServerRequest("bench")).toEqual({
       projectId: "ws_override",
       serverId: "srv_bench",
       serverName: "bench",
@@ -137,17 +175,17 @@ describe("hosted web context", () => {
   });
 
   it("blocks hosted project requests while client config sync is pending", () => {
-    setHostedApiContext({
+    setApiContext({
       projectId: "ws_pending",
       serverIdsByName: { bench: "srv_bench" },
       clientConfigSyncPending: true,
       getAccessToken: async () => null,
     });
 
-    expect(() => buildHostedServerRequest("bench")).toThrow(
+    expect(() => buildServerRequest("bench")).toThrow(
       CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE,
     );
-    expect(() => buildHostedServerBatchRequest(["bench"])).toThrow(
+    expect(() => buildServerBatchRequest(["bench"])).toThrow(
       CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE,
     );
     expect(() => buildHostedEvalServerBatchRequest(["bench"])).toThrow(
@@ -156,7 +194,7 @@ describe("hosted web context", () => {
   });
 
   it("keeps hosted eval server names aligned with deduped server ids", () => {
-    setHostedApiContext({
+    setApiContext({
       projectId: "ws_eval",
       isAuthenticated: true,
       serverIdsByName: {

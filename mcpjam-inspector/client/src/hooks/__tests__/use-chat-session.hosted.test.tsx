@@ -10,7 +10,7 @@ const mockState = vi.hoisted(() => ({
   setMessages: vi.fn(),
   addToolApprovalResponse: vi.fn(),
   authFetch: vi.fn(),
-  buildHostedServerRequest: vi.fn(),
+  buildServerRequest: vi.fn(),
   getAccessToken: vi.fn(async () => "access-token"),
   getGuestBearerToken: vi.fn(async () => "guest-token"),
   hasToken: vi.fn(() => false),
@@ -161,7 +161,7 @@ vi.mock("@/lib/guest-session", () => ({
 }));
 
 vi.mock("@/lib/apis/web/context", () => ({
-  buildHostedServerRequest: mockState.buildHostedServerRequest,
+  buildServerRequest: mockState.buildServerRequest,
 }));
 
 vi.mock("@workos-inc/authkit-react", () => ({
@@ -271,7 +271,7 @@ describe("useChatSession hosted mode", () => {
     mockState.authFetch.mockReset();
     mockState.authFetch.mockResolvedValue(new Response(null, { status: 200 }));
     mockState.setMessages.mockReset();
-    mockState.buildHostedServerRequest.mockReset();
+    mockState.buildServerRequest.mockReset();
     mockState.getAccessToken.mockReset();
     mockState.getAccessToken.mockResolvedValue("access-token");
     mockState.getGuestBearerToken.mockReset();
@@ -290,7 +290,7 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          shareToken: "share-token",
+          chatboxId: "cbx_test", accessVersion: 1,
         },
       })
     );
@@ -302,20 +302,20 @@ describe("useChatSession hosted mode", () => {
       chatSessionId: "chat-session-id",
       selectedServerIds: ["server-id-1"],
       selectedServerNames: ["server-1"],
-      shareToken: "share-token",
+      chatboxId: "cbx_test", accessVersion: 1,
       accessScope: "chat_v2",
     });
     unmount();
   });
 
-  it("includes chatboxToken in the hosted transport body", async () => {
+  it("includes chatboxId and accessVersion in the hosted transport body", async () => {
     const { result, unmount } = renderHook(() =>
       useChatSession({
         selectedServers: ["server-1"],
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          chatboxToken: "chatbox-token",
+          chatboxId: "cbx_test", accessVersion: 1,
           oauthTokens: {
             "server-id-1": "browser-token",
           },
@@ -330,7 +330,7 @@ describe("useChatSession hosted mode", () => {
       chatSessionId: "chat-session-id",
       selectedServerIds: ["server-id-1"],
       selectedServerNames: ["server-1"],
-      chatboxToken: "chatbox-token",
+      chatboxId: "cbx_test", accessVersion: 1,
       accessScope: "chat_v2",
     });
     expect(body).not.toHaveProperty("oauthTokens");
@@ -344,7 +344,7 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          chatboxToken: "chatbox-token",
+          chatboxId: "cbx_test", accessVersion: 1,
           chatboxSurface: "preview",
         },
       })
@@ -352,7 +352,7 @@ describe("useChatSession hosted mode", () => {
 
     const body = lastTransportOptions.body();
     expect(body).toMatchObject({
-      chatboxToken: "chatbox-token",
+      chatboxId: "cbx_test", accessVersion: 1,
       surface: "preview",
     });
     unmount();
@@ -403,7 +403,8 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: string;
           selectedServerIds: string[];
-          shareToken: string;
+          chatboxId: string;
+          accessVersion: number;
         };
       }) =>
         useChatSession({
@@ -416,7 +417,7 @@ describe("useChatSession hosted mode", () => {
           hostedContext: {
             projectId: "project-1",
             selectedServerIds: ["server-id-1"],
-            shareToken: "share-token-1",
+            chatboxId: "cbx_1", accessVersion: 1,
           },
         },
       }
@@ -435,7 +436,7 @@ describe("useChatSession hosted mode", () => {
       hostedContext: {
         projectId: "project-2",
         selectedServerIds: ["server-id-2"],
-        shareToken: "share-token-2",
+        chatboxId: "cbx_2", accessVersion: 1,
       },
     });
 
@@ -668,7 +669,7 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          shareToken: "share-token",
+          chatboxId: "cbx_test", accessVersion: 1,
         },
       })
     );
@@ -738,7 +739,7 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          shareToken: "share-token",
+          chatboxId: "cbx_test", accessVersion: 1,
         },
       })
     );
@@ -760,7 +761,7 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          shareToken: "share-token",
+          chatboxId: "cbx_test", accessVersion: 1,
         },
       })
     );
@@ -895,7 +896,7 @@ describe("useChatSession hosted mode", () => {
         hostedContext: {
           projectId: "project-1",
           selectedServerIds: ["server-id-1"],
-          shareToken: "share-token",
+          chatboxId: "cbx_test", accessVersion: 1,
         },
       })
     );

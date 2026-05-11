@@ -6,15 +6,21 @@ import { getDefaultClientCapabilities } from "@mcpjam/sdk/browser";
 
 type GetAccessTokenFn = () => Promise<string | undefined | null>;
 
-export interface HostedApiContext {
+export interface ApiContext {
   projectId: string | null;
   serverIdsByName: Record<string, string>;
   clientCapabilities?: Record<string, unknown>;
   clientConfigSyncPending?: boolean;
   getAccessToken?: GetAccessTokenFn;
   oauthTokensByServerId?: Record<string, string>;
-  shareToken?: string;
-  chatboxToken?: string;
+  /**
+   * Resolved chatbox identity. After /api/web/chatboxes/redeem resolves,
+   * the host clones these onto every chatbox-aware API call. The URL link
+   * token is consumed only at redemption time and never threaded onto the
+   * read path.
+   */
+  chatboxId?: string;
+  accessVersion?: number;
   isAuthenticated?: boolean;
   /** True when a WorkOS session exists (user signed in), even if token hasn't resolved yet. */
   hasSession?: boolean;
@@ -23,12 +29,12 @@ export interface HostedApiContext {
 // chat_v2 scope is required for all non-guest API requests that write to chat history.
 type HostedAccessScope = "project_member" | "chat_v2";
 
-const EMPTY_CONTEXT: HostedApiContext = {
+const EMPTY_CONTEXT: ApiContext = {
   projectId: null,
   serverIdsByName: {},
 };
 
-let hostedApiContext: HostedApiContext = EMPTY_CONTEXT;
+let apiContext: ApiContext = EMPTY_CONTEXT;
 let cachedBearerToken: { token: string; expiresAt: number } | null = null;
 
 const TOKEN_CACHE_TTL_MS = 30_000;
@@ -43,19 +49,19 @@ function assertHostedMode() {
   }
 }
 
-function assertHostedClientConfigSynced() {
-  if (!hostedApiContext.clientConfigSyncPending) {
+function assertClientConfigSynced() {
+  if (!apiContext.clientConfigSyncPending) {
     return;
   }
 
   throw new Error(CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE);
 }
 
-export function shouldRetryHostedAuth401(): boolean {
+export function shouldRetryApiAuth401(): boolean {
   // Retry the auth bootstrap on 401 whenever the actor isn't yet authenticated
   // and no session is in flight — applies to both hosted guests and local CLI
   // users post unification.
-  return !hostedApiContext.isAuthenticated && !hostedApiContext.hasSession;
+  return !apiContext.isAuthenticated && !apiContext.hasSession;
 }
 
 /**
@@ -73,8 +79,8 @@ function hasHostedGuestAccess(): boolean {
   // Now applies to both hosted and local: any actor without a WorkOS session
   // gets guest access. The local CLI mints its own guest bearer via the same
   // /api/web/guest-session endpoint hosted uses.
-  if (hostedApiContext.isAuthenticated) return false;
-  if (hostedApiContext.hasSession) return false;
+  if (apiContext.isAuthenticated) return false;
+  if (apiContext.hasSession) return false;
   return true;
 }
 
@@ -82,8 +88,8 @@ function shouldPreferGuestBearer(): boolean {
   return hasHostedGuestAccess();
 }
 
-export function setHostedApiContext(next: HostedApiContext | null): void {
-  hostedApiContext = next
+export function setApiContext(next: ApiContext | null): void {
+  apiContext = next
     ? {
         ...next,
         clientCapabilities:
@@ -105,17 +111,17 @@ export function setHostedApiContext(next: HostedApiContext | null): void {
  * post-save connect would fall back to the legacy `{serverConfig, serverId}`
  * shape for one tick.
  *
- * The next `setHostedApiContext` call from the subscription will overwrite
+ * The next `setApiContext` call from the subscription will overwrite
  * this with identical data, so there is no risk of stale entries.
  */
 export function injectHostedServerMapping(
   serverName: string,
   serverId: string,
 ): void {
-  hostedApiContext = {
-    ...hostedApiContext,
+  apiContext = {
+    ...apiContext,
     serverIdsByName: {
-      ...hostedApiContext.serverIdsByName,
+      ...apiContext.serverIdsByName,
       [serverName]: serverId,
     },
   };
@@ -124,7 +130,7 @@ export function injectHostedServerMapping(
 export function getHostedProjectId(): string {
   assertHostedMode();
 
-  const projectId = hostedApiContext.projectId;
+  const projectId = apiContext.projectId;
   if (!projectId) {
     throw new BootstrapNotReadyError(
       "provisioning-project",
@@ -147,12 +153,12 @@ export function getHostedProjectId(): string {
 export function tryResolveProjectServer(
   serverNameOrId: string,
 ): { projectId: string; serverId: string } | null {
-  const projectId = hostedApiContext.projectId;
+  const projectId = apiContext.projectId;
   if (!projectId) return null;
-  const direct = hostedApiContext.serverIdsByName[serverNameOrId];
+  const direct = apiContext.serverIdsByName[serverNameOrId];
   if (direct) return { projectId, serverId: direct };
   if (
-    Object.values(hostedApiContext.serverIdsByName).includes(serverNameOrId)
+    Object.values(apiContext.serverIdsByName).includes(serverNameOrId)
   ) {
     return { projectId, serverId: serverNameOrId };
   }
@@ -180,12 +186,12 @@ const HOSTED_SERVER_NOT_FOUND_OPAQUE_MESSAGE =
 export function resolveHostedServerId(serverNameOrId: string): string {
   assertHostedMode();
 
-  const mapped = hostedApiContext.serverIdsByName[serverNameOrId];
+  const mapped = apiContext.serverIdsByName[serverNameOrId];
   if (mapped) return mapped;
 
   // Allow direct server IDs for callers that already resolved names.
   if (
-    Object.values(hostedApiContext.serverIdsByName).includes(serverNameOrId)
+    Object.values(apiContext.serverIdsByName).includes(serverNameOrId)
   ) {
     return serverNameOrId;
   }
@@ -211,7 +217,7 @@ export function resolveHostedServerIds(serverNamesOrIds: string[]): string[] {
 }
 
 function findHostedServerName(serverId: string): string | undefined {
-  return Object.entries(hostedApiContext.serverIdsByName).find(
+  return Object.entries(apiContext.serverIdsByName).find(
     ([, mappedId]) => mappedId === serverId,
   )?.[0];
 }
@@ -234,7 +240,7 @@ export function tryGetHostedServerDisplayName(
     return undefined;
   }
 
-  if (hostedApiContext.serverIdsByName[trimmed] !== undefined) {
+  if (apiContext.serverIdsByName[trimmed] !== undefined) {
     return trimmed;
   }
 
@@ -260,7 +266,7 @@ export function normalizeHostedServerNames(
     }
 
     const serverName =
-      hostedApiContext.serverIdsByName[trimmed] !== undefined
+      apiContext.serverIdsByName[trimmed] !== undefined
         ? trimmed
         : (findHostedServerName(trimmed) ?? trimmed);
     const dedupeKey = serverName.toLowerCase();
@@ -289,7 +295,7 @@ function resolveHostedServerEntries(
     resolved.push({
       serverId,
       serverName:
-        hostedApiContext.serverIdsByName[serverNameOrId] !== undefined
+        apiContext.serverIdsByName[serverNameOrId] !== undefined
           ? serverNameOrId
           : (findHostedServerName(serverId) ?? serverNameOrId),
     });
@@ -299,24 +305,22 @@ function resolveHostedServerEntries(
 }
 
 export function getHostedOAuthToken(serverId: string): string | undefined {
-  return hostedApiContext.oauthTokensByServerId?.[serverId];
+  return apiContext.oauthTokensByServerId?.[serverId];
 }
 
-export function getHostedShareToken(): string | undefined {
-  return hostedApiContext.shareToken;
+export function getHostedChatboxId(): string | undefined {
+  return apiContext.chatboxId;
 }
 
-export function getHostedChatboxToken(): string | undefined {
-  return hostedApiContext.chatboxToken;
+export function getHostedChatboxAccessVersion(): number | undefined {
+  return apiContext.accessVersion;
 }
 
 function getHostedAccessScope(): HostedAccessScope | undefined {
-  return getHostedShareToken() || getHostedChatboxToken()
-    ? "chat_v2"
-    : undefined;
+  return getHostedChatboxId() ? "chat_v2" : undefined;
 }
 
-export function buildHostedServerRequest(
+export function buildServerRequest(
   serverNameOrId: string,
 ): Record<string, unknown> {
   // Single hosted path: every request — guest or authed — carries
@@ -325,63 +329,67 @@ export function buildHostedServerRequest(
   // early, `getHostedProjectId()` throws BootstrapNotReadyError instead
   // of emitting a guest-shape body that the server-side projectServerSchema
   // would reject with a confusing Zod 400.
-  assertHostedClientConfigSynced();
+  assertClientConfigSynced();
   // Project id is checked FIRST so a not-yet-bootstrapped caller gets the
   // typed BootstrapNotReadyError, not a "Hosted server not found" — which
   // would just confuse the user about what's actually missing.
   const projectId = getHostedProjectId();
   const serverId = resolveHostedServerId(serverNameOrId);
   const oauthToken = getHostedOAuthToken(serverId);
-  const shareToken = getHostedShareToken();
-  const chatboxToken = getHostedChatboxToken();
+  const chatboxId = getHostedChatboxId();
+  const accessVersion = getHostedChatboxAccessVersion();
   const accessScope = getHostedAccessScope();
   return {
     projectId,
     serverId,
     serverName:
-      hostedApiContext.serverIdsByName[serverNameOrId] !== undefined
+      apiContext.serverIdsByName[serverNameOrId] !== undefined
         ? serverNameOrId
         : (findHostedServerName(serverId) ?? serverNameOrId),
     ...(oauthToken ? { oauthAccessToken: oauthToken } : {}),
-    ...(hostedApiContext.clientCapabilities
-      ? { clientCapabilities: hostedApiContext.clientCapabilities }
+    ...(apiContext.clientCapabilities
+      ? { clientCapabilities: apiContext.clientCapabilities }
       : {}),
     ...(accessScope ? { accessScope } : {}),
-    ...(shareToken ? { shareToken } : {}),
-    ...(chatboxToken ? { chatboxToken } : {}),
+    ...(chatboxId ? { chatboxId } : {}),
+    ...(chatboxId && Number.isFinite(accessVersion)
+      ? { accessVersion }
+      : {}),
   };
 }
 
-export function buildHostedServerBatchRequest(serverNamesOrIds: string[]): {
+export function buildServerBatchRequest(serverNamesOrIds: string[]): {
   projectId: string;
   serverIds: string[];
   serverNames: string[];
   clientCapabilities?: Record<string, unknown>;
   oauthTokens?: Record<string, string>;
   accessScope?: HostedAccessScope;
-  shareToken?: string;
-  chatboxToken?: string;
+  chatboxId?: string;
+  accessVersion?: number;
 } {
-  assertHostedClientConfigSynced();
+  assertClientConfigSynced();
   const projectId = getHostedProjectId();
   const serverEntries = resolveHostedServerEntries(serverNamesOrIds);
   const serverIds = serverEntries.map((entry) => entry.serverId);
   const serverNames = serverEntries.map((entry) => entry.serverName);
   const oauthTokens = buildHostedOAuthTokensMap(serverIds);
-  const shareToken = getHostedShareToken();
-  const chatboxToken = getHostedChatboxToken();
+  const chatboxId = getHostedChatboxId();
+  const accessVersion = getHostedChatboxAccessVersion();
   const accessScope = getHostedAccessScope();
   return {
     projectId,
     serverIds,
     serverNames,
-    ...(hostedApiContext.clientCapabilities
-      ? { clientCapabilities: hostedApiContext.clientCapabilities }
+    ...(apiContext.clientCapabilities
+      ? { clientCapabilities: apiContext.clientCapabilities }
       : {}),
     ...(oauthTokens ? { oauthTokens } : {}),
     ...(accessScope ? { accessScope } : {}),
-    ...(shareToken ? { shareToken } : {}),
-    ...(chatboxToken ? { chatboxToken } : {}),
+    ...(chatboxId ? { chatboxId } : {}),
+    ...(chatboxId && Number.isFinite(accessVersion)
+      ? { accessVersion }
+      : {}),
   };
 }
 
@@ -392,30 +400,32 @@ export function buildHostedEvalServerBatchRequest(serverNamesOrIds: string[]): {
   clientCapabilities?: Record<string, unknown>;
   oauthTokens?: Record<string, string>;
   accessScope?: HostedAccessScope;
-  shareToken?: string;
-  chatboxToken?: string;
+  chatboxId?: string;
+  accessVersion?: number;
 } {
-  assertHostedClientConfigSynced();
+  assertClientConfigSynced();
   const projectId = getHostedProjectId();
   const serverEntries = resolveHostedServerEntries(serverNamesOrIds);
   const serverIds = serverEntries.map((entry) => entry.serverId);
   const serverNames = serverEntries.map((entry) => entry.serverName);
   const oauthTokens = buildHostedOAuthTokensMap(serverIds);
-  const shareToken = getHostedShareToken();
-  const chatboxToken = getHostedChatboxToken();
+  const chatboxId = getHostedChatboxId();
+  const accessVersion = getHostedChatboxAccessVersion();
   const accessScope = getHostedAccessScope();
 
   return {
     projectId,
     serverIds,
     serverNames,
-    ...(hostedApiContext.clientCapabilities
-      ? { clientCapabilities: hostedApiContext.clientCapabilities }
+    ...(apiContext.clientCapabilities
+      ? { clientCapabilities: apiContext.clientCapabilities }
       : {}),
     ...(oauthTokens ? { oauthTokens } : {}),
     ...(accessScope ? { accessScope } : {}),
-    ...(shareToken ? { shareToken } : {}),
-    ...(chatboxToken ? { chatboxToken } : {}),
+    ...(chatboxId ? { chatboxId } : {}),
+    ...(chatboxId && Number.isFinite(accessVersion)
+      ? { accessVersion }
+      : {}),
   };
 }
 
@@ -430,7 +440,7 @@ export function buildHostedOAuthTokensMap(
   return Object.keys(map).length > 0 ? map : undefined;
 }
 
-export async function getHostedAuthorizationHeader(): Promise<string | null> {
+export async function getApiAuthorizationHeader(): Promise<string | null> {
   // Single bearer-resolution path for hosted and local. authFetch decides
   // whether to attach the result based on the request's loopback/origin and
   // whether a token is available; this function never short-circuits on mode.
@@ -454,7 +464,7 @@ export async function getHostedAuthorizationHeader(): Promise<string | null> {
   }
 
   // Try WorkOS (logged-in user)
-  const getAccessToken = hostedApiContext.getAccessToken;
+  const getAccessToken = apiContext.getAccessToken;
   if (getAccessToken) {
     try {
       const token = await getAccessToken();

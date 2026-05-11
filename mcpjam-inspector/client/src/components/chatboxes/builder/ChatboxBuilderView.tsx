@@ -16,7 +16,7 @@ import {
   Save,
 } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useConvexAuth } from "@/lib/use-convex";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
 import { Button } from "@mcpjam/design-system/button";
 import { Card } from "@mcpjam/design-system/card";
 import {
@@ -46,7 +46,10 @@ import { getBillingErrorMessage } from "@/lib/billing-entitlements";
 import { getChatboxHostStyleShortLabel } from "@/lib/chatbox-host-style";
 import { ChatTabV2 } from "@/components/ChatTabV2";
 import { getLoadingIndicatorVariantForHostStyle } from "@/components/chat-v2/shared/loading-indicator-content";
-import type { ServerWithName } from "@/hooks/use-app-state";
+import type {
+  EnsureServersReadyResult,
+  ServerWithName,
+} from "@/hooks/use-app-state";
 import { useHostedOAuthGate } from "@/hooks/hosted/use-hosted-oauth-gate";
 import type { HostedOAuthRequiredDetails } from "@/lib/hosted-oauth-required";
 import { isHostedOAuthBusy } from "@/lib/hosted-oauth-resume";
@@ -67,7 +70,15 @@ import { ChatboxHostStyleProvider } from "@/contexts/chatbox-host-style-context"
 import type { ServerFormData } from "@/shared/types";
 import { buildChatboxCanvas } from "./chatboxCanvasBuilder";
 import { ChatboxCanvas } from "./ChatboxCanvas";
-import { DEFAULT_SYSTEM_PROMPT, toDraftConfig } from "./drafts";
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  draftToHostConfigInputV2,
+  toDraftConfig,
+} from "./drafts";
+import {
+  hostConfigDtoToInput,
+  type HostConfigDtoV2,
+} from "@/lib/host-config-v2";
 import {
   computeSectionStatuses,
   SetupChecklistPanel,
@@ -89,6 +100,16 @@ interface ChatboxBuilderViewProps {
   chatboxId?: string | null;
   draft: ChatboxDraftConfig | null;
   initialViewMode?: "setup" | "preview" | "usage" | "insights";
+  /**
+   * Reconnect the chatbox's MCP servers on the local inspector before the
+   * first preview message. Reuses the eval-tab helper from
+   * `useAppState.ensureServersReady` — without it, `prepareChatV2` in
+   * `/api/mcp/chat-v2` filters out unconnected servers and the LLM responds
+   * with zero MCP tools (e.g. ASCII drawings instead of an Excalidraw call).
+   */
+  ensureServersReady?: (
+    serverNames: string[],
+  ) => Promise<EnsureServersReadyResult>;
   onBack: () => void;
   onSavedDraft: (chatbox: ChatboxSettings) => void;
 }
@@ -284,6 +305,7 @@ export function ChatboxBuilderView({
   chatboxId,
   draft,
   initialViewMode,
+  ensureServersReady,
   onBack,
   onSavedDraft,
 }: ChatboxBuilderViewProps) {
@@ -296,6 +318,26 @@ export function ChatboxBuilderView({
   const { createChatbox, updateChatbox, setChatboxMode, upsertChatboxMember } =
     useChatboxMutations();
   const { createServer } = useServerMutations();
+
+  // Round-trip the chatbox's own hostConfig (edit mode). The save path
+  // sends a complete HostConfigInputV2 to the backend; the backend's
+  // mintV2ChatboxHostConfigFromV2Input persists the connection portion
+  // (connectionDefaults / clientCapabilities / hostContext) verbatim,
+  // so we MUST feed it the existing values or they'll be clobbered.
+  const chatboxHostConfig = useQuery(
+    "hostConfigsV2:getChatboxConfig" as any,
+    isAuthenticated && chatboxId ? ({ chatboxId } as any) : "skip"
+  ) as HostConfigDtoV2 | null | undefined;
+
+  // Project default seeds the connection portion for new chatboxes and
+  // is also the fallback for legacy edit-mode rows that resolve null
+  // from getChatboxConfig — without it, draftToHostConfigInputV2 would
+  // fall back to v2 empty shape and silently drop the project's
+  // configured headers / capabilities / hostContext on next save.
+  const projectDefaultHostConfig = useQuery(
+    "hostConfigsV2:getProjectDefault" as any,
+    isAuthenticated && projectId ? ({ projectId } as any) : "skip"
+  ) as HostConfigDtoV2 | null | undefined;
 
   const [draftChatboxConfig, setDraftChatboxConfig] =
     useState<ChatboxDraftConfig>(() => {
@@ -313,7 +355,7 @@ export function ChatboxBuilderView({
               temperature: 0.7,
               requireToolApproval: false,
               allowGuestAccess: false,
-              mode: "any_signed_in_with_link",
+              mode: "anyone_with_link",
               servers: [],
               link: null,
               members: [],
@@ -690,7 +732,7 @@ export function ChatboxBuilderView({
     pendingKey: CHATBOX_OAUTH_PENDING_KEY,
     servers: previewOAuthGateServers,
     projectId: chatbox?.projectId ?? projectId,
-    chatboxToken: chatbox?.link?.token,
+    chatboxId: chatbox?.chatboxId,
     isAuthenticated,
   });
 
@@ -710,6 +752,146 @@ export function ChatboxBuilderView({
     pendingOAuthServers,
     welcomeAvailable,
   });
+
+  // Auto-connect the chatbox's MCP servers on the inspector's local
+  // mcpClientManager before the first preview turn. Without this,
+  // prepareChatV2 in /api/mcp/chat-v2 filters out servers that aren't
+  // registered → the LLM gets zero tools → "draw a dog" returns ASCII
+  // art instead of an Excalidraw tool call. Mirrors the evals flow at
+  // EvalsTab.tsx:445 + use-eval-handlers.ts:653.
+  const activePreviewServerNames = useMemo(
+    () => activePreviewServers.map((s) => s.serverName),
+    [activePreviewServers]
+  );
+  // Stable key for the reconnect effect. The `\0` delimiter prevents
+  // collisions between e.g. ["ab","c"] and ["a","bc"] (both join to "abc"
+  // without one), which would otherwise let a server-set swap skip the
+  // effect entirely. Matches the convention in use-playground-project-executions.
+  const activePreviewServerNamesKey = useMemo(
+    () => activePreviewServerNames.slice().sort().join("\0"),
+    [activePreviewServerNames]
+  );
+  // Seed in "connecting" when the Preview tab opens with servers and the
+  // helper plumbed: the reconnect effect below only fires after the first
+  // paint, so an initial `"idle"` would leave previewConnectComposerBlocked
+  // false for one frame, letting the composer briefly accept input before
+  // the local mcpClientManager has the servers registered.
+  const [previewConnectStatus, setPreviewConnectStatus] = useState<{
+    phase: "idle" | "connecting" | "ready" | "blocked";
+    readyCount: number;
+    totalCount: number;
+    blockedReason?: string;
+  }>(() => {
+    const total = activePreviewServerNames.length;
+    if (viewMode === "preview" && ensureServersReady && total > 0) {
+      return { phase: "connecting", readyCount: 0, totalCount: total };
+    }
+    return { phase: "idle", readyCount: 0, totalCount: 0 };
+  });
+
+  useEffect(() => {
+    // Only run while the Preview tab is active. Switching to setup/usage
+    // shouldn't kick off reconnects (and the composer is hidden anyway).
+    if (viewMode !== "preview") {
+      return;
+    }
+    if (!ensureServersReady) {
+      // No helper plumbed (e.g. in tests or non-app shells). Treat as ready;
+      // the composer's other gates still apply.
+      setPreviewConnectStatus({
+        phase: "idle",
+        readyCount: activePreviewServerNames.length,
+        totalCount: activePreviewServerNames.length,
+      });
+      return;
+    }
+    if (activePreviewServerNames.length === 0) {
+      setPreviewConnectStatus({ phase: "ready", readyCount: 0, totalCount: 0 });
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewConnectStatus((prev) => ({
+      phase: "connecting",
+      readyCount: prev.phase === "ready" ? prev.readyCount : 0,
+      totalCount: activePreviewServerNames.length,
+    }));
+
+    void (async () => {
+      try {
+        const result = await ensureServersReady(activePreviewServerNames);
+        if (cancelled) return;
+        const total = activePreviewServerNames.length;
+        const ready = result.readyServerNames.length;
+        if (result.reauthServerNames.length > 0) {
+          setPreviewConnectStatus({
+            phase: "blocked",
+            readyCount: ready,
+            totalCount: total,
+            blockedReason: `Reconnect ${result.reauthServerNames.join(", ")} to send messages.`,
+          });
+          return;
+        }
+        if (result.missingServerNames.length > 0) {
+          setPreviewConnectStatus({
+            phase: "blocked",
+            readyCount: ready,
+            totalCount: total,
+            blockedReason: `Add ${result.missingServerNames.join(", ")} to the project to send messages.`,
+          });
+          return;
+        }
+        if (result.failedServerNames.length > 0) {
+          setPreviewConnectStatus({
+            phase: "blocked",
+            readyCount: ready,
+            totalCount: total,
+            blockedReason: `Couldn't connect ${result.failedServerNames.join(", ")}. Retry from the Servers tab.`,
+          });
+          return;
+        }
+        setPreviewConnectStatus({
+          phase: "ready",
+          readyCount: ready,
+          totalCount: total,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setPreviewConnectStatus({
+          phase: "blocked",
+          readyCount: 0,
+          totalCount: activePreviewServerNames.length,
+          blockedReason:
+            error instanceof Error
+              ? error.message
+              : "Couldn't connect chatbox servers. Try again.",
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Stable string key avoids reruns on activePreviewServerNames identity
+    // churn (the memo above produces a fresh array per render). viewMode
+    // gates the effect to the active Preview tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, activePreviewServerNamesKey, ensureServersReady]);
+
+  const previewConnectComposerBlocked =
+    previewConnectStatus.phase === "connecting" ||
+    previewConnectStatus.phase === "blocked";
+  const previewConnectComposerReason =
+    previewConnectStatus.phase === "connecting"
+      ? "Connecting servers…"
+      : previewConnectStatus.phase === "blocked"
+        ? previewConnectStatus.blockedReason
+        : undefined;
+  const composerBlocked =
+    introGate.composerBlocked || previewConnectComposerBlocked;
+  const composerBlockedReason = introGate.composerBlocked
+    ? "Get started or authorize to send messages…"
+    : previewConnectComposerReason;
 
   const handlePreviewOAuthRequired = useCallback(
     (details?: HostedOAuthRequiredDetails) => {
@@ -745,25 +927,57 @@ export function ChatboxBuilderView({
       return false;
     }
 
+    // On an edit route chatboxId is set before useChatbox() resolves;
+    // branching the create-vs-update decision below on `chatbox` (the
+    // reactive load) would let an early click fall into createChatbox
+    // and duplicate the row. Block save until the chatbox record is
+    // available, then key the branch off chatboxId.
+    if (chatboxId && !chatbox) {
+      toast.error("Loading chatbox — try again in a moment");
+      return false;
+    }
+
+    // The backend's v2 hostConfig path persists connection fields
+    // verbatim. Block save until a seed has resolved so we don't ship
+    // empty connectionDefaults / clientCapabilities / hostContext and
+    // clobber the existing values. For edit-mode chatboxes prefer the
+    // chatbox's own config; only fall back to the project default
+    // when the chatbox config has *resolved* null (legacy rows) — not
+    // while it's still undefined (loading), which would let the
+    // project default overwrite an existing chatbox's own connection
+    // fields if the project query resolves first. For create mode,
+    // use the project default directly.
+    const chatboxSeed =
+      chatboxHostConfig === null
+        ? projectDefaultHostConfig
+        : chatboxHostConfig;
+    const seedDto = chatboxId ? chatboxSeed : projectDefaultHostConfig;
+    if (seedDto === undefined) {
+      toast.error("Loading chatbox config — try again in a moment");
+      return false;
+    }
+    const seedInput = seedDto ? hostConfigDtoToInput(seedDto) : null;
+    const draftWithTrimmedSystemPrompt: ChatboxDraftConfig = {
+      ...draftChatboxConfig,
+      systemPrompt:
+        draftChatboxConfig.systemPrompt.trim() || DEFAULT_SYSTEM_PROMPT,
+    };
+    const hostConfigInput = draftToHostConfigInputV2(
+      draftWithTrimmedSystemPrompt,
+      seedInput
+    );
+
     setIsSaving(true);
     try {
       const payload = {
         name: trimmedName,
         description: draftChatboxConfig.description.trim() || undefined,
-        hostStyle: draftChatboxConfig.hostStyle,
-        systemPrompt:
-          draftChatboxConfig.systemPrompt.trim() || DEFAULT_SYSTEM_PROMPT,
-        modelId: draftChatboxConfig.modelId,
-        temperature: draftChatboxConfig.temperature,
-        requireToolApproval: draftChatboxConfig.requireToolApproval,
-        serverIds: draftChatboxConfig.selectedServerIds,
-        optionalServerIds: draftChatboxConfig.optionalServerIds,
-        allowGuestAccess: draftChatboxConfig.allowGuestAccess,
         welcomeDialog: draftChatboxConfig.welcomeDialog,
         feedbackDialog: draftChatboxConfig.feedbackDialog,
+        hostConfig: hostConfigInput,
       };
 
-      if (!chatbox) {
+      if (!chatboxId) {
         let created = (await createChatbox({
           projectId,
           ...payload,
@@ -781,9 +995,15 @@ export function ChatboxBuilderView({
       }
 
       await updateChatbox({
-        chatboxId: chatbox.chatboxId,
+        chatboxId,
         ...payload,
       });
+      if (chatbox && draftChatboxConfig.mode !== chatbox.mode) {
+        await setChatboxMode({
+          chatboxId,
+          mode: draftChatboxConfig.mode,
+        });
+      }
       toast.success("Chatbox updated");
       return true;
     } catch (error) {
@@ -797,6 +1017,9 @@ export function ChatboxBuilderView({
     draftChatboxConfig,
     onSavedDraft,
     chatbox,
+    chatboxId,
+    chatboxHostConfig,
+    projectDefaultHostConfig,
     setChatboxMode,
     updateChatbox,
     projectId,
@@ -1090,15 +1313,13 @@ export function ChatboxBuilderView({
                                   )}
                                   minimalMode
                                   reasoningDisplayMode="hidden"
-                                  hostedProjectIdOverride={
-                                    chatbox!.projectId
-                                  }
-                                  hostedSelectedServerIdsOverride={activePreviewServers.map(
-                                    (s) => s.serverId
-                                  )}
                                   hostedContext={{
-                                    chatboxToken: chatbox.link.token,
+                                    chatboxId: chatbox.chatboxId,
                                     chatboxSurface: "preview",
+                                    projectId: chatbox!.projectId,
+                                    selectedServerIds: activePreviewServers.map(
+                                      (s) => s.serverId
+                                    ),
                                   }}
                                   executionConfig={{
                                     modelId: draftChatboxConfig.modelId,
@@ -1112,10 +1333,10 @@ export function ChatboxBuilderView({
                                     draftChatboxConfig.hostStyle
                                   )}
                                   onOAuthRequired={handlePreviewOAuthRequired}
-                                  chatboxComposerBlocked={
-                                    introGate.composerBlocked
+                                  chatboxComposerBlocked={composerBlocked}
+                                  chatboxComposerBlockedReason={
+                                    composerBlockedReason ?? ""
                                   }
-                                  chatboxComposerBlockedReason="Get started or authorize to send messages…"
                                   chatboxOptionalInventory={selectedPreviewServers
                                     .filter(
                                       (s) =>
@@ -1180,7 +1401,11 @@ export function ChatboxBuilderView({
                             </div>
                             <div className="flex justify-between gap-2">
                               <dt className="text-muted-foreground">Servers</dt>
-                              <dd>{previewRailConfig.serverCount} connected</dd>
+                              <dd>
+                                {previewConnectStatus.totalCount > 0
+                                  ? `${previewConnectStatus.readyCount}/${previewConnectStatus.totalCount} connected`
+                                  : `${previewRailConfig.serverCount} configured`}
+                              </dd>
                             </div>
                             <div className="flex justify-between gap-2">
                               <dt className="text-muted-foreground">
