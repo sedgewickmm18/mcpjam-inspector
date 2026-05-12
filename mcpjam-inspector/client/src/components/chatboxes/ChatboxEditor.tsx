@@ -63,6 +63,7 @@ import {
 } from "@mcpjam/design-system/popover";
 import { getLoadingIndicatorVariantForHostStyle } from "@/components/chat-v2/shared/loading-indicator-content";
 import { ChatboxHostStyleProvider } from "@/contexts/chatbox-host-style-context";
+import { ChatboxHostCapabilitiesOverrideProvider } from "@/contexts/chatbox-host-capabilities-override-context";
 import { ChatboxHostOnboardingOverlays } from "@/components/hosted/ChatboxHostOnboardingOverlays";
 import { useChatboxHostIntroGate } from "@/components/hosted/useChatboxHostIntroGate";
 import type { ServerWithName } from "@/hooks/use-app-state";
@@ -477,8 +478,8 @@ export function ChatboxEditor({
 
   const oauthPending = pendingOAuthServers.length > 0;
   const welcomeAvailable =
-    (chatbox?.welcomeDialog?.enabled ?? true) &&
-    !!chatbox?.welcomeDialog?.body?.trim();
+    (chatbox?.chatUi?.surfaces?.welcome?.enabled ?? true) &&
+    !!chatbox?.chatUi?.surfaces?.welcome?.body?.trim();
   const introGate = useChatboxHostIntroGate({
     chatboxId: chatbox?.chatboxId ?? "",
     servers: requiredPreviewServers,
@@ -628,14 +629,19 @@ export function ChatboxEditor({
       mode,
       selectedServerIds,
       optionalServerIds,
-      welcomeDialog: {
-        enabled: chatbox?.welcomeDialog?.enabled ?? true,
-        body: chatbox?.welcomeDialog?.body ?? "",
-      },
-      feedbackDialog: {
-        enabled: chatbox?.feedbackDialog?.enabled ?? true,
-        everyNToolCalls: chatbox?.feedbackDialog?.everyNToolCalls ?? 1,
-        promptHint: chatbox?.feedbackDialog?.promptHint ?? "",
+      chatUi: {
+        surfaces: {
+          welcome: {
+            enabled: chatbox?.chatUi?.surfaces?.welcome?.enabled ?? true,
+            body: chatbox?.chatUi?.surfaces?.welcome?.body ?? "",
+          },
+          feedback: {
+            enabled: chatbox?.chatUi?.surfaces?.feedback?.enabled ?? true,
+            everyNToolCalls:
+              chatbox?.chatUi?.surfaces?.feedback?.everyNToolCalls ?? 1,
+            promptHint: chatbox?.chatUi?.surfaces?.feedback?.promptHint ?? "",
+          },
+        },
       },
     };
     const hostConfigInput = draftToHostConfigInputV2(synthDraft, seedInput);
@@ -733,9 +739,10 @@ export function ChatboxEditor({
       temperature,
       requireToolApproval,
       servers: selectedPreviewServers,
-      welcomeDialog: chatbox.welcomeDialog ?? {
-        enabled: true,
-        body: "",
+      chatUi: chatbox.chatUi ?? {
+        surfaces: {
+          welcome: { enabled: true, body: "" },
+        },
       },
     };
 
@@ -1233,6 +1240,9 @@ export function ChatboxEditor({
             ) : (
               <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                 <ChatboxHostStyleProvider value={hostStyle}>
+                  <ChatboxHostCapabilitiesOverrideProvider
+                    value={chatboxHostConfig?.hostCapabilitiesOverride}
+                  >
                   <div
                     className="flex min-h-0 flex-1 overflow-hidden"
                     data-host-style={hostStyle}
@@ -1283,11 +1293,12 @@ export function ChatboxEditor({
                       }}
                     />
                   </div>
+                  </ChatboxHostCapabilitiesOverrideProvider>
                 </ChatboxHostStyleProvider>
                 <ChatboxHostOnboardingOverlays
                   showWelcome={introGate.showWelcome}
                   onGetStarted={introGate.dismissIntro}
-                  welcomeBody={chatbox.welcomeDialog?.body}
+                  welcomeBody={chatbox.chatUi?.surfaces?.welcome?.body}
                   showAuthPanel={introGate.showAuthPanel}
                   pendingOAuthServers={pendingOAuthServers}
                   authorizeServer={authorizeServer}

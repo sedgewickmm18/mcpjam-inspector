@@ -27,6 +27,7 @@ import {
   getStoredTokens,
   clearOAuthData,
   initiateOAuth,
+  isElectronMcpCallbackState,
   readStoredOAuthConfig,
 } from "@/lib/oauth/mcp-oauth";
 import type { OAuthTrace } from "@/lib/oauth/oauth-trace";
@@ -48,6 +49,7 @@ import { useUIPlaygroundStore } from "@/stores/ui-playground-store";
 import { useServerMutations, type RemoteServer } from "./useProjects";
 import {
   CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE,
+  PROJECT_NOT_PROVISIONED_ERROR_MESSAGE,
   getEffectiveProjectConnectionDefaults,
   mergeProjectConnectionHeaders,
   resolveEffectiveServerClientCapabilities,
@@ -133,7 +135,7 @@ function mergeOAuthCallbackServerConfig(
       existingHttpConfig?.clientCapabilities ??
       callbackConfig.capabilities ??
       existingHttpConfig?.capabilities,
-  };
+  } as HttpServerConfig;
 }
 
 /**
@@ -200,6 +202,41 @@ function saveOAuthConfigToLocalStorage(formData: ServerFormData): void {
   } else {
     localStorage.removeItem(`mcp-client-${formData.name}`);
   }
+}
+
+export function buildElectronMcpCallbackUrl(): string | null {
+  if (window.isElectron || window.location.pathname !== "/oauth/callback") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (!params.get("code") && !params.get("error")) {
+    return null;
+  }
+
+  // Electron-started MCP OAuth explicitly tags the state parameter so the
+  // browser callback can hand control back to the desktop app without relying
+  // on browser-local storage heuristics.
+  if (!isElectronMcpCallbackState(params.get("state"))) {
+    return null;
+  }
+
+  const callbackUrl = new URL("mcpjam://oauth/callback");
+  callbackUrl.searchParams.set("flow", "mcp");
+
+  for (const [key, value] of params.entries()) {
+    callbackUrl.searchParams.append(key, value);
+  }
+
+  return callbackUrl.toString();
+}
+
+const OAUTH_CONNECTION_RETRY_DELAY_MS = 1500;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function readStoredClientCredentials(serverName: string): {
@@ -376,6 +413,29 @@ function requiresFreshOAuthAuthorization(error: unknown): boolean {
     ) ||
     (normalized.includes("authentication failed") &&
       normalized.includes("invalid_token"))
+  );
+}
+
+export function shouldRetryOAuthConnectionFailure(
+  errorMessage?: string,
+): boolean {
+  if (!errorMessage) {
+    return false;
+  }
+
+  const normalized = errorMessage.toLowerCase();
+  if (
+    normalized.includes("authentication failed") ||
+    normalized.includes("invalid_client") ||
+    normalized.includes("unauthorized_client")
+  ) {
+    return false;
+  }
+
+  return (
+    normalized.includes("request timed out") ||
+    normalized.includes("streamable http error") ||
+    normalized.includes("sse error: sse error: non-200 status code (404)")
   );
 }
 
@@ -687,7 +747,7 @@ export function useServerState({
           serverConfig.timeout ?? projectConnectionDefaults.requestTimeout,
         capabilities: effectiveClientCapabilities,
         clientCapabilities: effectiveClientCapabilities,
-      };
+      } as MCPServerConfig;
     },
     [activeProject?.clientConfig, projectConnectionDefaults]
   );
@@ -719,6 +779,31 @@ export function useServerState({
     toast.error(CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE);
     return true;
   }, [isClientConfigSyncPending]);
+
+  const isProjectProvisioned = useMemo(
+    () => Boolean(activeProject?.sharedProjectId),
+    [activeProject?.sharedProjectId]
+  );
+
+  const getProjectNotProvisionedError = useCallback(() => {
+    if (isProjectProvisioned) {
+      return null;
+    }
+    if (useLocalFallbackRef.current || !isAuthenticatedRef.current) {
+      return null;
+    }
+    return PROJECT_NOT_PROVISIONED_ERROR_MESSAGE;
+  }, [isProjectProvisioned]);
+
+  const notifyIfProjectNotProvisioned = useCallback(() => {
+    const errorMessage = getProjectNotProvisionedError();
+    if (!errorMessage) {
+      return false;
+    }
+
+    toast.error(errorMessage);
+    return true;
+  }, [getProjectNotProvisionedError]);
 
   // Extract runtime overlay applied by `withProjectConnectionDefaults` so the
   // resolver path can reproduce them server-side. Without this, the resolver
@@ -769,7 +854,7 @@ export function useServerState({
           connectionDefaults: buildResolverConnectionDefaults(serverConfig),
         });
       }
-      return testConnection(serverConfig, serverName);
+      throw new Error(PROJECT_NOT_PROVISIONED_ERROR_MESSAGE);
     },
     [assertClientConfigSynced, buildResolverConnectionDefaults]
   );
@@ -785,7 +870,7 @@ export function useServerState({
           connectionDefaults: buildResolverConnectionDefaults(serverConfig),
         });
       }
-      return reconnectServer(serverName, serverConfig);
+      throw new Error(PROJECT_NOT_PROVISIONED_ERROR_MESSAGE);
     },
     [assertClientConfigSynced, buildResolverConnectionDefaults]
   );
@@ -1314,6 +1399,46 @@ export function useServerState({
     [dispatch, fetchAndStoreInitInfo]
   );
 
+  const testConnectionAfterOAuth = useCallback(
+    async (serverConfig: MCPServerConfig, serverName: string) => {
+      try {
+        const firstResult = await guardedTestConnection(
+          serverConfig,
+          serverName
+        );
+        if (
+          firstResult.success ||
+          !shouldRetryOAuthConnectionFailure(firstResult.error)
+        ) {
+          return firstResult;
+        }
+
+        logger.warn(
+          "Retrying OAuth connection after transient transport error",
+          {
+            serverName,
+            error: firstResult.error,
+          },
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown connection error";
+        if (!shouldRetryOAuthConnectionFailure(errorMessage)) {
+          throw error;
+        }
+
+        logger.warn("Retrying OAuth connection after transport exception", {
+          serverName,
+          error: errorMessage,
+        });
+      }
+
+      await delay(OAUTH_CONNECTION_RETRY_DELAY_MS);
+      return guardedTestConnection(serverConfig, serverName);
+    },
+    [guardedTestConnection, logger]
+  );
+
   const resolveOAuthInitiationInputs = useCallback(
     async (
       formData: ServerFormData
@@ -1397,6 +1522,8 @@ export function useServerState({
         localStorage.removeItem("mcp-oauth-return-hash");
         if (isHostedProjectCallback) {
           clearHostedOAuthPendingState();
+        }
+        if (result.success) {
           localStorage.removeItem("mcp-oauth-pending");
         }
 
@@ -1412,10 +1539,7 @@ export function useServerState({
             readStoredClientCredentials(serverName);
           const resolvedOAuthProfile = buildResolvedOAuthProfile({
             serverName,
-            serverUrl:
-              mergedServerConfig.url instanceof URL
-                ? mergedServerConfig.url.href
-                : String(mergedServerConfig.url),
+            serverUrl: String(mergedServerConfig.url),
             existingProfile: existingServer?.oauthFlowProfile,
             storedOAuthConfig,
             storedClientCredentials,
@@ -1463,7 +1587,7 @@ export function useServerState({
           });
 
           try {
-            const connectionResult = await guardedTestConnection(
+            const connectionResult = await testConnectionAfterOAuth(
               withProjectConnectionDefaults(mergedServerConfig),
               serverName
             );
@@ -1565,6 +1689,7 @@ export function useServerState({
       logger,
       persistServerToLocalProject,
       storeInitInfo,
+      testConnectionAfterOAuth,
       guardedTestConnection,
       syncServerToConvex,
       updateServerOAuthTrace,
@@ -1594,9 +1719,13 @@ export function useServerState({
     const state = urlParams.get("state");
     const error = urlParams.get("error");
     const errorDescription = urlParams.get("error_description");
+    const electronCallbackUrl = buildElectronMcpCallbackUrl();
     const hostedOAuthCallbackContext = HOSTED_MODE
       ? getHostedOAuthCallbackContext()
       : null;
+    if (electronCallbackUrl) {
+      return;
+    }
     const isHostedProjectCallback =
       hostedOAuthCallbackContext?.surface === "project";
     if (code) {
@@ -1678,6 +1807,9 @@ export function useServerState({
   const handleConnect = useCallback(
     async (formData: ServerFormData) => {
       if (notifyIfClientConfigSyncPending()) {
+        return;
+      }
+      if (notifyIfProjectNotProvisioned()) {
         return;
       }
 
@@ -2003,7 +2135,11 @@ export function useServerState({
           serverName: formData.name,
           error: errorMessage,
         });
-        toast.error(`Network error: ${errorMessage}`);
+        toast.error(
+          errorMessage === PROJECT_NOT_PROVISIONED_ERROR_MESSAGE
+            ? errorMessage
+            : `Network error: ${errorMessage}`
+        );
       }
     },
     [
@@ -2013,6 +2149,7 @@ export function useServerState({
       appState.projects,
       appState.activeProjectId,
       notifyIfClientConfigSyncPending,
+      notifyIfProjectNotProvisioned,
       prepareHostedProjectOAuthRedirect,
       resolveOAuthInitiationInputs,
       syncServerToConvex,
@@ -2248,6 +2385,9 @@ export function useServerState({
       if (notifyIfClientConfigSyncPending()) {
         return;
       }
+      if (notifyIfProjectNotProvisioned()) {
+        return;
+      }
 
       const result = await applyTokensFromOAuthFlow(
         serverName,
@@ -2260,7 +2400,11 @@ export function useServerState({
         toast.error(`Connection failed: ${result.error}`);
       }
     },
-    [applyTokensFromOAuthFlow, notifyIfClientConfigSyncPending]
+    [
+      applyTokensFromOAuthFlow,
+      notifyIfClientConfigSyncPending,
+      notifyIfProjectNotProvisioned,
+    ]
   );
 
   const handleRefreshTokensFromOAuthFlow = useCallback(
@@ -2279,6 +2423,9 @@ export function useServerState({
       if (notifyIfClientConfigSyncPending()) {
         return;
       }
+      if (notifyIfProjectNotProvisioned()) {
+        return;
+      }
 
       const result = await applyTokensFromOAuthFlow(
         serverName,
@@ -2291,7 +2438,11 @@ export function useServerState({
         toast.error(`Token refresh failed: ${result.error}`);
       }
     },
-    [applyTokensFromOAuthFlow, notifyIfClientConfigSyncPending]
+    [
+      applyTokensFromOAuthFlow,
+      notifyIfClientConfigSyncPending,
+      notifyIfProjectNotProvisioned,
+    ]
   );
 
   const cliConfigProcessedRef = useRef<boolean>(false);
@@ -2546,6 +2697,15 @@ export function useServerState({
         return {
           status: "failed",
           error: errorMessage,
+        };
+      }
+
+      const projectNotProvisionedError = getProjectNotProvisionedError();
+      if (projectNotProvisionedError) {
+        reportError(projectNotProvisionedError);
+        return {
+          status: "failed",
+          error: projectNotProvisionedError,
         };
       }
 
@@ -3011,6 +3171,7 @@ export function useServerState({
       activeProjectServersFlat,
       isAuthenticated,
       isClientConfigSyncPending,
+      getProjectNotProvisionedError,
       storeInitInfo,
       logger,
       dispatch,
@@ -3311,6 +3472,9 @@ export function useServerState({
       if (notifyIfClientConfigSyncPending()) {
         return { ok: false, serverName: originalServerName };
       }
+      if (notifyIfProjectNotProvisioned()) {
+        return { ok: false, serverName: originalServerName };
+      }
 
       const shouldPreserveOAuth =
         hadOAuthTokens &&
@@ -3394,6 +3558,7 @@ export function useServerState({
       useLocalFallback,
       persistServerToLocalProject,
       notifyIfClientConfigSyncPending,
+      notifyIfProjectNotProvisioned,
       guardedTestConnection,
     ]
   );

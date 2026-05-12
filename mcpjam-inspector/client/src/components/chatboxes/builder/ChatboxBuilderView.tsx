@@ -67,12 +67,14 @@ import {
   type ChatboxBootstrapServer,
 } from "@/lib/chatbox-session";
 import { ChatboxHostStyleProvider } from "@/contexts/chatbox-host-style-context";
+import { ChatboxHostCapabilitiesOverrideProvider } from "@/contexts/chatbox-host-capabilities-override-context";
 import type { ServerFormData } from "@/shared/types";
 import { buildChatboxCanvas } from "./chatboxCanvasBuilder";
 import { ChatboxCanvas } from "./ChatboxCanvas";
 import {
   DEFAULT_SYSTEM_PROMPT,
   draftToHostConfigInputV2,
+  toChatUiFromChatbox,
   toDraftConfig,
 } from "./drafts";
 import {
@@ -359,11 +361,15 @@ export function ChatboxBuilderView({
               servers: [],
               link: null,
               members: [],
-              welcomeDialog: { enabled: true, body: "" },
-              feedbackDialog: {
-                enabled: true,
-                everyNToolCalls: 1,
-                promptHint: "",
+              chatUi: {
+                surfaces: {
+                  welcome: { enabled: true, body: "" },
+                  feedback: {
+                    enabled: true,
+                    everyNToolCalls: 1,
+                    promptHint: "",
+                  },
+                },
               },
             } as ChatboxSettings)
         );
@@ -416,8 +422,7 @@ export function ChatboxBuilderView({
         requireToolApproval: draftChatboxConfig.requireToolApproval,
         mode: draftChatboxConfig.mode,
         allowGuestAccess: draftChatboxConfig.allowGuestAccess,
-        welcomeDialog: draftChatboxConfig.welcomeDialog,
-        feedbackDialog: draftChatboxConfig.feedbackDialog,
+        chatUi: draftChatboxConfig.chatUi,
         selectedServerIds: [...draftChatboxConfig.selectedServerIds].sort(),
         optionalServerIds: [...draftChatboxConfig.optionalServerIds].sort(),
       }),
@@ -524,11 +529,12 @@ export function ChatboxBuilderView({
       temperature: draftChatboxConfig.temperature,
       requireToolApproval: draftChatboxConfig.requireToolApproval,
       servers,
-      welcomeDialog: draftChatboxConfig.welcomeDialog,
+      chatUi: draftChatboxConfig.chatUi,
     };
 
     writePlaygroundSession({
-      token: chatbox.link.token,
+      chatboxId: chatbox.chatboxId,
+      accessVersion: 0,
       payload,
       surface: "preview",
       playgroundId,
@@ -579,20 +585,8 @@ export function ChatboxBuilderView({
       draftChatboxConfig.requireToolApproval !== chatbox.requireToolApproval ||
       draftChatboxConfig.mode !== chatbox.mode ||
       draftChatboxConfig.allowGuestAccess !== chatbox.allowGuestAccess ||
-      JSON.stringify(draftChatboxConfig.welcomeDialog) !==
-        JSON.stringify({
-          enabled: chatbox.welcomeDialog?.enabled ?? true,
-          body: chatbox.welcomeDialog?.body ?? "",
-        }) ||
-      JSON.stringify(draftChatboxConfig.feedbackDialog) !==
-        JSON.stringify({
-          enabled: chatbox.feedbackDialog?.enabled ?? true,
-          everyNToolCalls: Math.max(
-            1,
-            chatbox.feedbackDialog?.everyNToolCalls ?? 1
-          ),
-          promptHint: chatbox.feedbackDialog?.promptHint ?? "",
-        }) ||
+      JSON.stringify(draftChatboxConfig.chatUi) !==
+        JSON.stringify(toChatUiFromChatbox(chatbox)) ||
       JSON.stringify(currentIds) !== JSON.stringify(draftIds) ||
       JSON.stringify(optionalFromChatbox) !== JSON.stringify(draftOptionalIds)
     );
@@ -742,8 +736,8 @@ export function ChatboxBuilderView({
 
   const oauthPending = pendingOAuthServers.length > 0;
   const welcomeAvailable =
-    draftChatboxConfig.welcomeDialog.enabled &&
-    !!draftChatboxConfig.welcomeDialog.body?.trim();
+    draftChatboxConfig.chatUi.surfaces.welcome.enabled &&
+    !!draftChatboxConfig.chatUi.surfaces.welcome.body?.trim();
   const introGate = useChatboxHostIntroGate({
     chatboxId: introChatboxId,
     servers: requiredPreviewServers,
@@ -972,8 +966,7 @@ export function ChatboxBuilderView({
       const payload = {
         name: trimmedName,
         description: draftChatboxConfig.description.trim() || undefined,
-        welcomeDialog: draftChatboxConfig.welcomeDialog,
-        feedbackDialog: draftChatboxConfig.feedbackDialog,
+        chatUi: draftChatboxConfig.chatUi,
         hostConfig: hostConfigInput,
       };
 
@@ -1144,20 +1137,20 @@ export function ChatboxBuilderView({
       return {
         hostStyle: chatbox.hostStyle,
         serverCount: chatbox.servers.length,
-        welcomeOn: chatbox.welcomeDialog?.enabled ?? true,
-        feedbackOn: chatbox.feedbackDialog?.enabled ?? true,
+        welcomeOn: chatbox.chatUi?.surfaces?.welcome?.enabled ?? true,
+        feedbackOn: chatbox.chatUi?.surfaces?.feedback?.enabled ?? true,
         feedbackEvery: Math.max(
           1,
-          chatbox.feedbackDialog?.everyNToolCalls ?? 1
+          chatbox.chatUi?.surfaces?.feedback?.everyNToolCalls ?? 1
         ),
       };
     }
     return {
       hostStyle: draftChatboxConfig.hostStyle,
       serverCount: draftChatboxConfig.selectedServerIds.length,
-      welcomeOn: draftChatboxConfig.welcomeDialog.enabled,
-      feedbackOn: draftChatboxConfig.feedbackDialog.enabled,
-      feedbackEvery: draftChatboxConfig.feedbackDialog.everyNToolCalls,
+      welcomeOn: draftChatboxConfig.chatUi.surfaces.welcome.enabled,
+      feedbackOn: draftChatboxConfig.chatUi.surfaces.feedback.enabled,
+      feedbackEvery: draftChatboxConfig.chatUi.surfaces.feedback.everyNToolCalls,
     };
   }, [chatbox, isDirty, draftChatboxConfig]);
 
@@ -1303,6 +1296,9 @@ export function ChatboxBuilderView({
                               <ChatboxHostStyleProvider
                                 value={draftChatboxConfig.hostStyle}
                               >
+                              <ChatboxHostCapabilitiesOverrideProvider
+                                value={chatboxHostConfig?.hostCapabilitiesOverride}
+                              >
                                 <ChatTabV2
                                   key={chatKey}
                                   connectedOrConnectingServerConfigs={
@@ -1356,12 +1352,13 @@ export function ChatboxBuilderView({
                                     );
                                   }}
                                 />
+                              </ChatboxHostCapabilitiesOverrideProvider>
                               </ChatboxHostStyleProvider>
                               <ChatboxHostOnboardingOverlays
                                 showWelcome={introGate.showWelcome}
                                 onGetStarted={introGate.dismissIntro}
                                 welcomeBody={
-                                  draftChatboxConfig.welcomeDialog.body
+                                  draftChatboxConfig.chatUi.surfaces.welcome.body
                                 }
                                 showAuthPanel={introGate.showAuthPanel}
                                 pendingOAuthServers={pendingOAuthServers}
