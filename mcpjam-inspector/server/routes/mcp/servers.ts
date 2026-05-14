@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import "../../types/hono"; // Type extensions
 import { rpcLogBus, type RpcLogEvent } from "../../services/rpc-log-bus";
+import { isSqliteMode } from "../../db/index.js";
+import {
+  listServers as listKnownServers,
+} from "../../services/local-server-registry.js";
 import { logger } from "../../utils/logger";
 import {
   executeLocalServerConnect,
@@ -139,6 +143,20 @@ servers.delete("/:serverId", async (c) => {
       500,
     );
   }
+});
+
+// List all known servers from the local registry (SQLite mode only).
+// Returns servers from CLI config that are available for connection,
+// even if they haven't been connected yet.
+servers.get("/known", async (c) => {
+  if (!isSqliteMode()) {
+    return c.json(
+      { success: false, error: "Only available in local mode" },
+      400,
+    );
+  }
+  const knownServers = listKnownServers();
+  return c.json({ success: true, servers: knownServers });
 });
 
 // Reconnect to a server. Body shape: {projectId, serverId, serverName}; the

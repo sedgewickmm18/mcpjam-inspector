@@ -111,7 +111,9 @@ import {
 } from "./config";
 import "./types/hono"; // Type extensions
 import { initXAAIdpKeyPair } from "./services/xaa-idp-keypair";
+import { ensureDefaultProject } from "./db/project-init";
 import { initializeSqlite, shutdownSqlite, isSqliteMode } from "./db";
+import { initFromCLIConfig } from "./services/local-server-registry";
 
 // Utility function to extract MCP server config from environment variables
 function getMCPConfigFromEnv() {
@@ -214,6 +216,14 @@ initXAAIdpKeyPair();
 
 // Initialize SQLite database if in local mode (no Convex)
 if (initializeSqlite()) {
+  await ensureDefaultProject();
+
+  // Populate the local server registry from CLI config
+  const mcpConfig = getMCPConfigFromEnv();
+  if (mcpConfig && mcpConfig.servers && mcpConfig.servers.length > 0) {
+    initFromCLIConfig(mcpConfig);
+  }
+
   appLogger.info("📦 Running in local persistence mode (SQLite)");
 } else {
   appLogger.info("☁️ Running in cloud persistence mode (Convex)");

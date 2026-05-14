@@ -43,13 +43,15 @@ import { startGuestAuthProvisioningInBackground } from "./utils/convex-guest-aut
 import { fetchRemoteGuestJwks } from "./utils/guest-session-source.js";
 import { INSPECTOR_MCP_RETRY_POLICY } from "./utils/mcp-retry-policy.js";
 import { initXAAIdpKeyPair } from "./services/xaa-idp-keypair.js";
+import { ensureDefaultProject } from "./db/project-init.js";
+import { initializeSqlite, isSqliteMode } from "./db/index.js";
 import { requestLogContextMiddleware } from "./middleware/request-log-context.js";
 import { getInspectorFrontendUrl } from "./utils/inspector-frontend-url.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export function createHonoApp() {
+export async function createHonoApp() {
   // Load environment variables early so route handlers can read CONVEX_HTTP_URL
   const loadedEnv = loadInspectorEnv(__dirname);
   warnOnConvexDevMisconfiguration(loadedEnv);
@@ -64,6 +66,10 @@ export function createHonoApp() {
   generateSessionToken();
   initXAAIdpKeyPair();
 
+ 
+  if (initializeSqlite()) {
+    await ensureDefaultProject();
+  }
   startGuestAuthProvisioningInBackground();
 
   const app = new Hono();

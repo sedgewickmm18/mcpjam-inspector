@@ -1,4 +1,4 @@
-import { ConvexError } from "convex/values";
+import { ConvexError } from "@/lib/use-convex";
 import { describe, expect, it } from "vitest";
 import {
   getBillingErrorMessage,

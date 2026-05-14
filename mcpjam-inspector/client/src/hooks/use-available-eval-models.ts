@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
 import {
   isMCPJamProvidedModel,
   type ModelDefinition,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RotateCcw, Save, Settings2 } from "lucide-react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "@/lib/use-convex";
 import { toast } from "sonner";
 import { Button } from "@mcpjam/design-system/button";
 import { HostConfigEditor } from "@/components/host-config/HostConfigEditor";

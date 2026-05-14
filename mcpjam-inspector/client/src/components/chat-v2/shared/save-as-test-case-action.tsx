@@ -1,4 +1,4 @@
-import { useAction, useQuery } from "convex/react";
+import { useAction, useQuery } from "@/lib/use-convex";
 import { useMemo, useState } from "react";
 import { FlaskConical, Loader2 } from "lucide-react";
 import { useFeatureFlagEnabled } from "posthog-js/react";

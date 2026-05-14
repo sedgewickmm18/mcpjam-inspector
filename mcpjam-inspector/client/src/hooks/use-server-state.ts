@@ -764,21 +764,30 @@ export function useServerState({
   );
 
   const assertClientConfigSynced = useCallback(() => {
-    if (!isClientConfigSyncPending) {
+    // In local mode, there's no remote Echo (Convex) to sync with,
+    // so we can skip the sync pending check entirely.
+    const shouldCheckSync = HOSTED_MODE && isClientConfigSyncPending;
+    
+    if (!shouldCheckSync) {
       return;
     }
 
     throw new Error(CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE);
-  }, [isClientConfigSyncPending]);
+  }, [HOSTED_MODE, isClientConfigSyncPending]);
 
   const notifyIfClientConfigSyncPending = useCallback(() => {
+    // Only block connections during sync if we're in hosted mode
+    if (!HOSTED_MODE) {
+      return false;
+    }
+  
     if (!isClientConfigSyncPending) {
       return false;
     }
 
     toast.error(CLIENT_CONFIG_SYNC_PENDING_ERROR_MESSAGE);
     return true;
-  }, [isClientConfigSyncPending]);
+  }, [HOSTED_MODE, isClientConfigSyncPending]);
 
   const isProjectProvisioned = useMemo(
     () => Boolean(activeProject?.sharedProjectId),
@@ -786,14 +795,30 @@ export function useServerState({
   );
 
   const getProjectNotProvisionedError = useCallback(() => {
+    // Debug: Log all relevant state to diagnose provisioning check
+    console.warn("[DEBUG getProjectNotProvisionedError]", {
+      HOSTED_MODE,
+      isProjectProvisioned,
+      useLocalFallback: useLocalFallbackRef.current,
+      isAuthenticated: isAuthenticatedRef.current,
+    });
+    
+    // In local mode, there's no project provisioning required
+    if (!HOSTED_MODE) {
+      console.warn("[DEBUG getProjectNotProvisionedError] Skipping project provisioning check in local mode");
+      return null;
+    }
     if (isProjectProvisioned) {
+      console.warn("[DEBUG getProjectNotProvisionedError] Project is already provisioned");
       return null;
     }
     if (useLocalFallbackRef.current || !isAuthenticatedRef.current) {
+      console.warn("[DEBUG getProjectNotProvisionedError] Using local fallback or not authenticated");
       return null;
     }
+    console.warn("[DEBUG getProjectNotProvisionedError] Returning PROJECT_NOT_PROVISIONED_ERROR_MESSAGE");
     return PROJECT_NOT_PROVISIONED_ERROR_MESSAGE;
-  }, [isProjectProvisioned]);
+  }, [isProjectProvisioned, HOSTED_MODE, useLocalFallback, isAuthenticated]);
 
   const notifyIfProjectNotProvisioned = useCallback(() => {
     const errorMessage = getProjectNotProvisionedError();
@@ -840,6 +865,22 @@ export function useServerState({
 
   const guardedTestConnection = useCallback(
     async (serverConfig: MCPServerConfig, serverName: string) => {
+      // Debug: Log guardedTestConnection entry to diagnose connection flow
+      console.warn("[DEBUG guardedTestConnection]", {
+        serverName,
+        isClientConfigSyncPending,
+        HOSTED_MODE,
+      });
+    
+      // Wait up to 30s for client config sync
+      let retries = 0;
+      const maxRetries = 300; // 30s / 100ms = 300 checks
+    
+      while (isClientConfigSyncPending && retries < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        retries++;
+      }
+    
       assertClientConfigSynced();
       // Opt into the resolver path when both projectId and a Convex serverId
       // are populated in the API context; otherwise fall back to legacy
@@ -854,13 +895,41 @@ export function useServerState({
           connectionDefaults: buildResolverConnectionDefaults(serverConfig),
         });
       }
+      
+      // In local mode, fall back to legacy test connection when the server
+      // hasn't been synced to Convex yet or API context isn't updated.
+      // This handles newly added servers that haven't been persisted yet.
+      const actualUseLocalFallback = !HOSTED_MODE || useLocalFallbackRef.current;
+
+      // if (useLocalFallbackRef.current) {
+      if (actualUseLocalFallback) {
+        const projectId = effectiveActiveProjectIdRef.current;
+        if (projectId && projectId !== "none") {
+          console.warn("[DEBUG guardedTestConnection] Falling back to local mode legacy connection");
+          return testConnection(serverConfig, serverName, {
+            projectId,
+            serverName,
+            connectionDefaults: buildResolverConnectionDefaults(serverConfig),
+          });
+        }
+      }
+      
       throw new Error(PROJECT_NOT_PROVISIONED_ERROR_MESSAGE);
     },
-    [assertClientConfigSynced, buildResolverConnectionDefaults]
+    [assertClientConfigSynced, buildResolverConnectionDefaults, useLocalFallback, effectiveActiveProjectIdRef]
   );
 
   const guardedReconnectServer = useCallback(
     async (serverName: string, serverConfig: MCPServerConfig) => {
+      // Wait up to 30s for client config sync
+      let retries = 0;
+      const maxRetries = 300; // 30s / 100ms = 300 checks
+    
+      while (isClientConfigSyncPending && retries < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        retries++;
+      }
+    
       assertClientConfigSynced();
       const resolved = tryResolveProjectServer(serverName);
       if (resolved) {
@@ -869,6 +938,22 @@ export function useServerState({
           serverName,
           connectionDefaults: buildResolverConnectionDefaults(serverConfig),
         });
+      }
+      // In local mode, fall back to legacy reconnection when the server
+      // hasn't been synced to Convex yet or API context isn't updated.
+      // This handles newly added servers that haven't been persisted yet.
+      const actualUseLocalFallback = !HOSTED_MODE || useLocalFallbackRef.current;
+
+      // if (useLocalFallbackRef.current) {
+      if (actualUseLocalFallback) {
+        const projectId = effectiveActiveProjectIdRef.current;
+        if (projectId && projectId !== "none") {
+          return reconnectServer(serverName, serverConfig, {
+            projectId,
+            serverName,
+            connectionDefaults: buildResolverConnectionDefaults(serverConfig),
+          });
+        }
       }
       throw new Error(PROJECT_NOT_PROVISIONED_ERROR_MESSAGE);
     },

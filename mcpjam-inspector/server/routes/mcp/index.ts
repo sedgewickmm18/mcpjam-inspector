@@ -22,6 +22,7 @@ import conformance from "./conformance";
 import xaa from "./xaa";
 import command from "./command";
 import subscribe from "./subscribe";
+import projects from "./projects";
 
 const mcp = new Hono();
 
@@ -101,5 +102,8 @@ mcp.route("/skills", skills);
 
 // Conformance endpoints - Protocol, Apps, OAuth checks
 mcp.route("/conformance", conformance);
+
+// Projects endpoints - Local project management (SQLite)
+mcp.route("/projects", projects);
 
 export default mcp;

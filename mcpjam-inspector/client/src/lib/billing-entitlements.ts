@@ -1,4 +1,4 @@
-import { ConvexError } from "convex/values";
+import { ConvexError } from "@/lib/use-convex";
 import type {
   BillingFeatureName,
   BillingInterval,

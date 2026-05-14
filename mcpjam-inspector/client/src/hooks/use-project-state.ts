@@ -1,3 +1,4 @@
+import { HOSTED_MODE } from "@/lib/config";
 import {
   useCallback,
   useEffect,
@@ -283,7 +284,7 @@ export function useProjectState({
   // sees the same skeleton they'd see during a normal cold start. The
   // constant below is kept inline so the dead-code branches that still
   // reference `shouldUseLocalFallback` collapse cleanly without renames.
-  const shouldUseLocalFallback = false as const;
+  const shouldUseLocalFallback = !HOSTED_MODE;
 
   const clearConvexActiveProjectSelection = useCallback(() => {
     setConvexActiveProjectId(null);

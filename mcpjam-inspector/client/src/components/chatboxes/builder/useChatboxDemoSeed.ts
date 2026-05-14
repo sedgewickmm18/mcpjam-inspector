@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "@/lib/use-convex";
 import { toast } from "sonner";
 import type { ChatboxListItem, ChatboxSettings } from "@/hooks/useChatboxes";
 import {

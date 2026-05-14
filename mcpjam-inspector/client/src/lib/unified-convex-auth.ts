@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAuth as useWorkOSAuth } from "@workos-inc/authkit-react";
+import { useAuth as useWorkOSAuth } from "@/lib/use-auth";
 import { NON_PROD_LOCKDOWN } from "@/lib/config";
 import {
   forceRefreshGuestSession,

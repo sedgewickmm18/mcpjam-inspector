@@ -1,5 +1,11 @@
 import type { Context } from "hono";
 import type { MCPClientManager, MCPServerConfig } from "@mcpjam/sdk";
+import { getDefaultProjectId } from "../db/project-init.js";
+import { isSqliteMode } from "../db/index.js";
+import {
+  getServerConfig,
+  configToAuthFormat,
+} from "../services/local-server-registry.js";
 import {
   ErrorCode,
   WebRouteError,
@@ -77,6 +83,38 @@ export function readLocalApiBearer(c: Context): string | null {
 }
 
 /**
+ * SQLite-mode replacement for `authorizeBatchLocal`: look up server configs
+ * from the local in-memory registry instead of calling Convex.
+ * All local servers are "authorized" with full access — local mode has no
+ * auth restrictions beyond the session token gating localhost access.
+ */
+function authorizeBatchLocalFromRegistry(
+  serverIds: string[]
+): LocalAuthorizeBatchResponse {
+  const results: Record<string, LocalAuthorizeBatchResult> = {};
+  for (const serverId of serverIds) {
+    const config = getServerConfig(serverId);
+    if (!config) {
+      results[serverId] = {
+        ok: false,
+        status: 404,
+        code: "NOT_FOUND",
+        message: `Server "${serverId}" not found in local registry`,
+      };
+      continue;
+    }
+    results[serverId] = {
+      ok: true,
+      role: "owner",
+      accessLevel: "full",
+      permissions: { chatOnly: false },
+      serverConfig: configToAuthFormat(config) as LocalAuthorizeServerConfig,
+    };
+  }
+  return { results };
+}
+
+/**
  * Call Convex `/web/authorize-batch-local` with the user's bearer.
  * Returns the full server config for each requested serverId, including
  * STDIO command/args/env. Hosted-only fields (share/chatbox tokens) are not
@@ -88,6 +126,11 @@ export async function authorizeBatchLocal(
   projectId: string,
   serverIds: string[]
 ): Promise<LocalAuthorizeBatchResponse> {
+  // SQLite mode: skip Convex entirely, use local server registry
+  if (isSqliteMode()) {
+    return authorizeBatchLocalFromRegistry(serverIds);
+  }
+
   const convexUrl = process.env.CONVEX_HTTP_URL;
   if (!convexUrl) {
     throw new WebRouteError(
@@ -488,8 +531,25 @@ export function parseLocalConnectRequestBody(
     };
   }
 
-  const projectId =
+  // In SQLite mode, always override projectId with the local default.
+  // In Convex mode, use the projectId from the request body.
+  let projectId =
     typeof raw.projectId === "string" ? raw.projectId.trim() : "";
+
+  if (isSqliteMode()) {
+    // Always use the local default project — ignore whatever the frontend sends
+    const defaultId = getDefaultProjectId();
+    if (defaultId) {
+      projectId = defaultId;
+    }
+  } else if (!projectId) {
+    const defaultId = getDefaultProjectId();
+    if (defaultId) {
+      projectId = defaultId;
+    }
+  }
+  console.log("BMMU project is " + projectId)
+
   if (!projectId) {
     return {
       ok: false,
@@ -514,8 +574,10 @@ export function parseLocalConnectRequestBody(
     };
   }
 
+  // In SQLite mode, bearer is optional — session token middleware already
+  // gates localhost access. In Convex mode, bearer is required for identity.
   const bearer = readLocalApiBearer(c);
-  if (!bearer) {
+  if (!bearer && !isSqliteMode()) {
     return {
       ok: false,
       error: new WebRouteError(
@@ -537,7 +599,7 @@ export function parseLocalConnectRequestBody(
       serverId,
       projectId,
       serverDisplayName,
-      bearer,
+      bearer: bearer ?? "",
       clientCapabilities,
       defaults: parseConnectionDefaults(raw.connectionDefaults),
     },

@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import { existsSync } from "fs";
 import { join, resolve } from "path";
 import { logger as appLogger } from "./utils/logger.js";
+import { getDb } from "./db/connection.js";
 
 export type InspectorEnvMode = "development" | "production";
 
@@ -16,6 +17,7 @@ export interface InspectorClientRuntimeConfig {
   convexUrl?: string;
   convexSiteUrl?: string;
   persistenceMode: "convex" | "sqlite";
+  defaultProjectId?: string;
 }
 
 function getInspectorEnvMode(): InspectorEnvMode {
@@ -142,12 +144,24 @@ export function getInspectorClientRuntimeConfig(): InspectorClientRuntimeConfig 
       ".convex.cloud",
     ) ?? normalizeUrlOrigin(process.env.VITE_CONVEX_URL);
 
+  const defaultProjectId = isSqlite ? (() => {
+    try {
+      const db = getDb();
+      const project = db.prepare("SELECT id FROM workspaces WHERE id = ? LIMIT 1").get("local-default") as { id: string } | undefined;
+      return project?.id;
+    } catch {
+      return undefined;
+    }
+  })() : undefined;
+
   return {
     convexUrl: isSqlite ? undefined : convexUrl,
     convexSiteUrl: isSqlite ? undefined : convexSiteUrl,
     persistenceMode: isSqlite ? "sqlite" : "convex",
+    defaultProjectId,
   };
 }
+
 
 export function getInspectorClientRuntimeConfigScript(): string {
   const runtimeConfig = getInspectorClientRuntimeConfig();
