@@ -38,6 +38,8 @@ import { ConformanceTab } from "./components/conformance/ConformancePanel";
 import { XAAFlowTab } from "./components/xaa/XAAFlowTab";
 import { ErrorBoundary } from "./components/ui/error-boundary";
 import { AppBuilderTab } from "./components/ui-playground/AppBuilderTab";
+import { PlaygroundTab } from "./components/playground/PlaygroundTab";
+import { PlaygroundHeaderSlotProvider } from "./components/playground/playground-header-slot";
 import { EmptyState } from "./components/ui/empty-state";
 import { EXCALIDRAW_SERVER_NAME } from "./lib/excalidraw-quick-connect";
 import { isFirstRunEligible } from "./lib/onboarding-state";
@@ -46,6 +48,9 @@ import { BillingUpsellGate } from "./components/billing/BillingUpsellGate";
 import { OrganizationsTab } from "./components/OrganizationsTab";
 import { SupportTab } from "./components/SupportTab";
 import { RegistryTab } from "./components/RegistryTab";
+import { HostsTab } from "./components/HostsTab";
+import { HostPicker } from "./components/hosts/HostPicker";
+import { useHost } from "./hooks/useHosts";
 import OAuthDebugCallback from "./components/oauth/OAuthDebugCallback";
 import OAuthDesktopReturnNotice from "./components/oauth/OAuthDesktopReturnNotice";
 import { MCPSidebar } from "./components/mcp-sidebar";
@@ -372,6 +377,10 @@ function AppChromeHeader({ hidden, ...props }: AppChromeHeaderProps) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("servers");
+  const [chatTabHostId, setChatTabHostId] = useState<string | null>(null);
+  const [hostsTabSelectedHostId, setHostsTabSelectedHostId] = useState<
+    string | null
+  >(null);
   const [evalChatHandoff, setEvalChatHandoff] =
     useState<EvalChatHandoff | null>(null);
   const [activeOrganizationSection, setActiveOrganizationSection] =
@@ -399,7 +408,9 @@ export default function App() {
   const learningEnabled = useFeatureFlagEnabled("mcpjam-learning");
   const registryEnabled = useFeatureFlagEnabled("registry-enabled");
   const conformanceEnabled = useFeatureFlagEnabled("mcpjam-conformance");
+  const hostsEnabled = useFeatureFlagEnabled("hosts-enabled");
   const playgroundEnabled = useFeatureFlagEnabled("playground-enabled");
+  const playgroundTabEnabled = useFeatureFlagEnabled("playground-tab-enabled");
   const evaluateRunsEnabled = useFeatureFlagEnabled("evaluate-runs");
   const xaaEnabled = useFeatureFlagEnabled("xaa");
   const {
@@ -411,6 +422,10 @@ export default function App() {
   } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const actorKey = useActorKey();
+  const { host: chatTabHost } = useHost({
+    isAuthenticated: isAuthenticated && hostsEnabled === true,
+    hostId: chatTabHostId,
+  });
   const currentUser = useQuery(
     "users:getCurrentUser" as any,
     isAuthenticated ? ({} as any) : "skip"
@@ -787,6 +802,7 @@ export default function App() {
     pendingDashboardOAuth,
     isCloudSyncActive,
     persistRuntimeServerToProjectIfNeeded,
+    activeMcpProfile,
   } = useAppState({
     currentUserId: workOsUser?.id ?? null,
     currentActorKey: actorKey,
@@ -796,6 +812,7 @@ export default function App() {
     routeOrganizationId: hasRouteOrganization
       ? currentHashRoute.organizationId
       : undefined,
+    activeHostConfig: chatTabHost?.config,
   });
   useInspectorCommandBus();
   // One-time migration from legacy localStorage state to Convex. No-op in
@@ -973,6 +990,20 @@ export default function App() {
     activeProject?.clientConfig
   ) as Record<string, unknown>;
   const convexProjectId = activeProject?.sharedProjectId ?? null;
+  // chatTabHostId/hostsTabSelectedHostId are project-scoped — drop them when
+  // the active project, auth, or feature flag changes so host-derived config
+  // can't bleed across projects (e.g. switching to project B while a project-A
+  // host is still selected in the Chat tab picker).
+  useEffect(() => {
+    if (!hostsEnabled || !isAuthenticated || !convexProjectId) {
+      setChatTabHostId(null);
+      setHostsTabSelectedHostId(null);
+    }
+  }, [hostsEnabled, isAuthenticated, convexProjectId]);
+  useEffect(() => {
+    setChatTabHostId(null);
+    setHostsTabSelectedHostId(null);
+  }, [convexProjectId]);
   const routeScopedOrganizationId = hasRouteOrganization
     ? currentHashRoute.organizationId ?? null
     : null;
@@ -1192,6 +1223,7 @@ export default function App() {
         window.location.hash || "#servers",
         HOSTED_MODE
       );
+
       const shouldPreserveCurrentRouteOrganization =
         options?.preserveCurrentOrganizationOnNonOrgTarget !== false &&
         !resolved.organizationId &&
@@ -1588,6 +1620,8 @@ export default function App() {
         )} plan. Upgrade the organization to continue.`
       );
       applyNavigation("servers", { updateHash: true });
+    } else if (activeTab === "hosts" && (hostsEnabled !== true || !isAuthenticated)) {
+      applyNavigation("servers", { updateHash: true });
     } else if (activeTab === "registry" && registryEnabled !== true) {
       applyNavigation("servers", { updateHash: true });
     } else if (
@@ -1601,14 +1635,23 @@ export default function App() {
       applyNavigation("servers", { updateHash: true });
     } else if (activeTab === "xaa-flow" && xaaEnabled !== true) {
       applyNavigation("servers", { updateHash: true });
+    } else if (activeTab === "playground" && playgroundTabEnabled !== true) {
+      applyNavigation("servers", { updateHash: true });
+    } else if (
+      (activeTab === "chat-v2" || activeTab === "app-builder") &&
+      playgroundTabEnabled === true
+    ) {
+      applyNavigation("playground", { updateHash: true });
     }
   }, [
     conformanceEnabled,
+    hostsEnabled,
     registryEnabled,
     learningEnabled,
     evaluateRunsFlagsLoaded,
     evaluateRunsEnabled,
     xaaEnabled,
+    playgroundTabEnabled,
     isAuthenticated,
     activeTab,
     applyNavigation,
@@ -1832,12 +1875,17 @@ export default function App() {
   const playgroundServerSelectorProps = useMemo(():
     | PlaygroundServerSelectorProps
     | undefined => {
-    if (activeTab !== "app-builder") return undefined;
+    if (activeTab !== "app-builder" && activeTab !== "playground")
+      return undefined;
     return {
       serverConfigs: projectServers,
       selectedServer: appState.selectedServer,
       selectedMultipleServers: appState.selectedMultipleServers,
-      isMultiSelectEnabled: false,
+      // Playground supports multi-server selection — the user can toggle
+      // several servers on simultaneously, the chat session sees their union,
+      // and the docked tools pane aggregates tools across all of them.
+      // App Builder stays single-server.
+      isMultiSelectEnabled: activeTab === "playground",
       onServerChange: setSelectedServer,
       onMultiServerToggle: toggleServerSelection,
       onConnect: handleConnect,
@@ -1985,6 +2033,7 @@ export default function App() {
       : undefined;
 
   const appContent = (
+    <PlaygroundHeaderSlotProvider>
     <SidebarProvider defaultOpen={true}>
       <AppChromeSidebar
         hidden={appBuilderOnboarding}
@@ -2026,31 +2075,46 @@ export default function App() {
             </div>
           ) : null}
           {/* Content Areas */}
-          {activeTab === "servers" && (
-            <ServersTab
-              projectServers={projectServers}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-              onReconnect={handleReconnect}
-              onUpdate={handleUpdate}
-              onRemove={handleRemoveServer}
-              projects={projects}
-              activeProjectId={activeProjectId}
-              organizationId={activeProjectBillingOrganizationId}
-              pendingDashboardOAuth={pendingDashboardOAuth}
-              isBillingContextPending={isBillingContextPending}
-              isLoadingProjects={isLoadingRemoteProjects}
-              onProjectShared={handleProjectShared}
-              onLeaveProject={() => handleLeaveProject(activeProjectId)}
-              isRegistryEnabled={registryEnabled === true}
-              onNavigateToRegistry={
-                registryEnabled === true
-                  ? () => handleNavigate("registry")
-                  : undefined
-              }
-              onSaveClientConfig={handleUpdateClientConfig}
-            />
-          )}
+          {(activeTab === "servers" ||
+            (activeTab === "hosts" &&
+              hostsEnabled === true &&
+              isAuthenticated)) && (() => {
+            const serversTabElement = (
+              <ServersTab
+                projectServers={projectServers}
+                onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
+                onReconnect={handleReconnect}
+                onUpdate={handleUpdate}
+                onRemove={handleRemoveServer}
+                projects={projects}
+                activeProjectId={activeProjectId}
+                organizationId={activeProjectBillingOrganizationId}
+                pendingDashboardOAuth={pendingDashboardOAuth}
+                isBillingContextPending={isBillingContextPending}
+                isLoadingProjects={isLoadingRemoteProjects}
+                onProjectShared={handleProjectShared}
+                onLeaveProject={() => handleLeaveProject(activeProjectId)}
+                isRegistryEnabled={registryEnabled === true}
+                onNavigateToRegistry={
+                  registryEnabled === true
+                    ? () => handleNavigate("registry")
+                    : undefined
+                }
+                onSaveClientConfig={handleUpdateClientConfig}
+              />
+            );
+            if (activeTab === "servers") return serversTabElement;
+            return (
+              <HostsTab
+                projectId={convexProjectId}
+                isAuthenticated={isAuthenticated}
+                selectedHostId={hostsTabSelectedHostId}
+                onSelectHost={setHostsTabSelectedHostId}
+                serversTabElement={serversTabElement}
+              />
+            );
+          })()}
           {activeTab === "registry" && registryEnabled === true && (
             <RegistryTab
               projectId={convexProjectId}
@@ -2302,18 +2366,76 @@ export default function App() {
             </ErrorBoundary>
           )}
           {activeTab === "chat-v2" && (
-            <HostStyledChatTabV2
-              connectedOrConnectingServerConfigs={
-                connectedOrConnectingServerConfigs
-              }
-              selectedServerNames={appState.selectedMultipleServers}
-              allServerConfigs={projectServers}
-              onServerToggle={toggleServerSelection}
-              onReconnectServer={handleReconnect}
-              onAddServer={handleConnect}
-              onSelectedServerNamesChange={setSelectedMCPConfigs}
-              enableMultiModelChat
-              showHostStyleSelector
+            <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+              {hostsEnabled === true && isAuthenticated && convexProjectId && (
+                <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+                  <span className="text-xs text-muted-foreground">Host:</span>
+                  <div className="w-48">
+                    <HostPicker
+                      projectId={convexProjectId}
+                      value={chatTabHostId}
+                      onChange={setChatTabHostId}
+                      placeholder="Project default"
+                      noneLabel="Project default"
+                    />
+                  </div>
+                </div>
+              )}
+              <HostStyledChatTabV2
+                connectedOrConnectingServerConfigs={
+                  connectedOrConnectingServerConfigs
+                }
+                selectedServerNames={appState.selectedMultipleServers}
+                allServerConfigs={projectServers}
+                onServerToggle={toggleServerSelection}
+                onReconnectServer={handleReconnect}
+                onAddServer={handleConnect}
+                onSelectedServerNamesChange={setSelectedMCPConfigs}
+                enableMultiModelChat
+                showHostStyleSelector
+                executionConfig={
+                  chatTabHost
+                    ? {
+                        modelId: chatTabHost.config.modelId,
+                        systemPrompt: chatTabHost.config.systemPrompt,
+                        temperature: chatTabHost.config.temperature,
+                        requireToolApproval: chatTabHost.config.requireToolApproval,
+                      }
+                    : undefined
+                }
+                // Active project default `mcpProfile`. Mounting the provider
+                // here is the in-inspector counterpart to ChatboxChatPage's
+                // hosted mount — without it, MCPAppsRenderer reads
+                // `undefined` from useActiveMcpProfile() and skips the
+                // sandbox-policy resolver entirely.
+                activeMcpProfile={chatTabHost?.config.mcpProfile ?? activeMcpProfile}
+                evalChatHandoff={evalChatHandoff}
+                onEvalChatHandoffConsumed={(id) =>
+                  setEvalChatHandoff((current) =>
+                    current?.id === id ? null : current
+                  )
+                }
+              />
+            </div>
+          )}
+          {activeTab === "tracing" && <TracingTab />}
+          {activeTab === "playground" && playgroundTabEnabled === true && (
+            <PlaygroundTab
+              serverConfig={selectedMCPConfig}
+              serverName={appState.selectedServer}
+              servers={projectServers}
+              activeProjectId={activeProjectId}
+              isSignedInWithWorkOs={!!workOsUser}
+              isWorkOsAuthLoading={isWorkOsLoading}
+              isConvexAuthenticated={isAuthenticated}
+              isProjectProvisioned={Boolean(activeProject?.sharedProjectId)}
+              hasSeenFirstRunOnboarding={remoteFirstRunOnboardingShown}
+              isServerSyncing={isSelectedServerSyncing}
+              onConnect={handleConnect}
+              onSaveHostContext={handleUpdateHostContext}
+              ensureServersReady={ensureServersReady}
+              onOnboardingChange={setAppBuilderOnboarding}
+              playgroundServerSelectorProps={playgroundServerSelectorProps}
               evalChatHandoff={evalChatHandoff}
               onEvalChatHandoffConsumed={(id) =>
                 setEvalChatHandoff((current) =>
@@ -2322,7 +2444,6 @@ export default function App() {
               }
             />
           )}
-          {activeTab === "tracing" && <TracingTab />}
           {activeTab === "app-builder" && (
             <AppBuilderTab
               serverConfig={selectedMCPConfig}
@@ -2436,6 +2557,7 @@ export default function App() {
         </DialogContent>
       </Dialog>
     </SidebarProvider>
+    </PlaygroundHeaderSlotProvider>
   );
 
   return (

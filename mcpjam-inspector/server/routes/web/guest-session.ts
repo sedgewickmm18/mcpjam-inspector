@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
   fetchConvexGuestPromotionProof,
   fetchConvexGuestSession,
@@ -31,21 +31,85 @@ setInterval(() => {
 }, 5 * 60_000).unref();
 
 const GUEST_SESSION_COOKIE_NAME = "__Host-mcpjam_guest_session";
+const LOCAL_GUEST_SESSION_COOKIE_NAME = "mcpjam_guest_session";
+const LOCAL_GUEST_SESSION_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 
 // Forward only the guest-session cookie to the upstream guest service.
 // Passing the entire Cookie header would leak unrelated auth/CSRF cookies
 // from the Inspector origin to Convex / hosted MCPJam.
-function extractGuestSessionCookie(
+function extractCookieValue(
   cookieHeader: string | null | undefined,
+  cookieName: string
 ): string | null {
   if (!cookieHeader) return null;
-  const prefix = `${GUEST_SESSION_COOKIE_NAME}=`;
+  const prefix = `${cookieName}=`;
   for (const part of cookieHeader.split(/;\s*/)) {
     if (part.startsWith(prefix)) {
-      return part;
+      return part.slice(prefix.length);
     }
   }
   return null;
+}
+
+function extractGuestSessionCookie(
+  cookieHeader: string | null | undefined
+): string | null {
+  const localCookie = extractCookieValue(
+    cookieHeader,
+    LOCAL_GUEST_SESSION_COOKIE_NAME
+  );
+  if (localCookie) {
+    return `${GUEST_SESSION_COOKIE_NAME}=${localCookie}`;
+  }
+
+  const upstreamCookie = extractCookieValue(
+    cookieHeader,
+    GUEST_SESSION_COOKIE_NAME
+  );
+  return upstreamCookie
+    ? `${GUEST_SESSION_COOKIE_NAME}=${upstreamCookie}`
+    : null;
+}
+
+function isLocalHttpRequest(requestUrl: string): boolean {
+  try {
+    const url = new URL(requestUrl);
+    return (
+      url.protocol === "http:" &&
+      LOCAL_GUEST_SESSION_HOSTNAMES.has(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function rewriteGuestSessionCookieForLocalHttp(cookie: string): string {
+  const parts = cookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const [nameValue, ...attributes] = parts;
+  if (!nameValue?.startsWith(`${GUEST_SESSION_COOKIE_NAME}=`)) {
+    return cookie;
+  }
+
+  return [
+    nameValue.replace(
+      `${GUEST_SESSION_COOKIE_NAME}=`,
+      `${LOCAL_GUEST_SESSION_COOKIE_NAME}=`
+    ),
+    ...attributes.filter((attribute) => !/^secure$/i.test(attribute)),
+  ].join("; ");
+}
+
+function appendGuestSessionSetCookie(c: Context, cookie: string): void {
+  c.header("Set-Cookie", cookie, { append: true });
+  if (isLocalHttpRequest(c.req.url)) {
+    const localCookie = rewriteGuestSessionCookieForLocalHttp(cookie);
+    if (localCookie !== cookie) {
+      c.header("Set-Cookie", localCookie, { append: true });
+    }
+  }
 }
 
 function shouldFetchGuestSessionFromConvex(): boolean {
@@ -85,7 +149,8 @@ function parseRequestBody(raw: unknown): GuestSessionRequestBody {
  * forwards browser cookie/UA context to the upstream guest service so the
  * server can resolve a stable guest from the HttpOnly cookie. Spoofable
  * client IP headers are intentionally not forwarded. Set-Cookie
- * headers from upstream are passed through unchanged.
+ * headers from upstream are passed through unchanged, with an additional
+ * local HTTP-compatible cookie emitted for localhost/127.0.0.1 runtimes.
  *
  * Inspector rate-limits this endpoint locally and either:
  * - proxies to Convex in hosted web and local dev
@@ -100,7 +165,7 @@ guestSession.post("/", async (c) => {
         code: ErrorCode.FORBIDDEN,
         message: "Guest access is disabled in this environment.",
       },
-      403,
+      403
     );
   }
 
@@ -112,7 +177,7 @@ guestSession.post("/", async (c) => {
         message:
           "Unable to determine client IP for guest session rate limiting.",
       },
-      429,
+      429
     );
   }
   const rateLimitKey = ip ?? "local-dev";
@@ -128,7 +193,7 @@ guestSession.post("/", async (c) => {
             code: ErrorCode.RATE_LIMITED,
             message: "Too many guest session requests. Try again later.",
           },
-          429,
+          429
         );
       }
       entry.count++;
@@ -160,7 +225,7 @@ guestSession.post("/", async (c) => {
     cookie: extractGuestSessionCookie(c.req.header("cookie")),
     userAgent: c.req.header("user-agent") ?? null,
     body,
-    ipHash,
+    ...(ipHash ? { ipHash } : {}),
   };
 
   const result = shouldFetchGuestSessionFromConvex()
@@ -168,7 +233,7 @@ guestSession.post("/", async (c) => {
     : await fetchRemoteGuestSession(context);
 
   for (const cookie of result.setCookies) {
-    c.header("Set-Cookie", cookie, { append: true });
+    appendGuestSessionSetCookie(c, cookie);
   }
 
   if (result.kind === "session") {
@@ -185,17 +250,16 @@ guestSession.post("/", async (c) => {
         code: ErrorCode.FORBIDDEN,
         message: "Guest session revoked.",
       },
-      403,
+      403
     );
   }
 
   return c.json(
     {
       code: ErrorCode.INTERNAL_ERROR,
-      message:
-        "Unable to obtain a guest session right now. Please try again.",
+      message: "Unable to obtain a guest session right now. Please try again.",
     },
-    503,
+    503
   );
 });
 
@@ -234,7 +298,7 @@ guestSession.post("/revoke", async (c) => {
         code: ErrorCode.FORBIDDEN,
         message: "Guest access is disabled in this environment.",
       },
-      403,
+      403
     );
   }
 
@@ -254,10 +318,10 @@ guestSession.post("/revoke", async (c) => {
   // load-bearing part of the contract.
   if (result.setCookies.length > 0) {
     for (const cookie of result.setCookies) {
-      c.header("Set-Cookie", cookie, { append: true });
+      appendGuestSessionSetCookie(c, cookie);
     }
   } else {
-    c.header("Set-Cookie", buildExpiredGuestSessionCookie(), { append: true });
+    appendGuestSessionSetCookie(c, buildExpiredGuestSessionCookie());
   }
 
   if (result.status >= 200 && result.status < 300) {
@@ -275,7 +339,7 @@ guestSession.post("/revoke", async (c) => {
       code: ErrorCode.INTERNAL_ERROR,
       message: "Unable to revoke guest session right now.",
     },
-    503,
+    503
   );
 });
 
@@ -299,7 +363,7 @@ guestSession.post("/promotion-proof", async (c) => {
         code: ErrorCode.FORBIDDEN,
         message: "Guest access is disabled in this environment.",
       },
-      403,
+      403
     );
   }
 
@@ -311,7 +375,7 @@ guestSession.post("/promotion-proof", async (c) => {
         message:
           "Unable to determine client IP for guest session rate limiting.",
       },
-      429,
+      429
     );
   }
   const rateLimitKey = ip ?? "local-dev";
@@ -326,7 +390,7 @@ guestSession.post("/promotion-proof", async (c) => {
             code: ErrorCode.RATE_LIMITED,
             message: "Too many guest session requests. Try again later.",
           },
-          429,
+          429
         );
       }
       entry.count++;
@@ -357,14 +421,14 @@ guestSession.post("/promotion-proof", async (c) => {
 
   if (result.kind === "revoked") {
     for (const cookie of result.setCookies) {
-      c.header("Set-Cookie", cookie, { append: true });
+      appendGuestSessionSetCookie(c, cookie);
     }
     return c.json(
       {
         code: ErrorCode.FORBIDDEN,
         message: "Guest session revoked.",
       },
-      403,
+      403
     );
   }
 
@@ -374,7 +438,7 @@ guestSession.post("/promotion-proof", async (c) => {
       message:
         "Unable to obtain a guest promotion proof right now. Please try again.",
     },
-    503,
+    503
   );
 });
 

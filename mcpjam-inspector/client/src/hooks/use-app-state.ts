@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useConvexAuth } from "@/lib/use-convex";
+import { useConvexAuth, useQuery } from "@/lib/use-convex";
+import type { HostConfigDtoV2 } from "@/lib/host-config-v2";
 import { useLogger } from "./use-logger";
 import {
   createLocalDefaultProject,
@@ -164,6 +165,7 @@ export function useAppState({
   hasOrganizations,
   isLoadingOrganizations,
   validOrganizations,
+  activeHostConfig,
 }: {
   currentUserId: string | null;
   /**
@@ -177,6 +179,13 @@ export function useAppState({
   hasOrganizations: boolean;
   isLoadingOrganizations: boolean;
   validOrganizations: Array<{ _id: string; myRole?: string }>;
+  /**
+   * When a named host is active in the Chat tab (or host preview), its
+   * connectionDefaults + per-server overrides drive reconnects via
+   * useServerState. App.tsx resolves this from the chat-tab HostPicker
+   * selection; useAppState forwards it untouched.
+   */
+  activeHostConfig?: HostConfigDtoV2;
 }) {
   const logger = useLogger("Connections");
   const [appState, dispatch] = useReducer(appReducer, initialAppState);
@@ -458,6 +467,23 @@ export function useAppState({
     logger,
   });
 
+  // Active project default hostConfig DTO. Sourced from Convex so it
+  // stays current with edits made in the HostConfigEditor without a
+  // page reload. We pluck `mcpProfile` out and pass it down to
+  // useServerState so resolver-path connects can pin clientInfo and
+  // supportedProtocolVersions. `skip` when the active project isn't
+  // a real Convex project (guest local-mode fallback) — those flows
+  // don't have an mcpProfile, so SDK defaults apply.
+  const activeSharedProjectId =
+    projectState.effectiveProjects[projectState.effectiveActiveProjectId]
+      ?.sharedProjectId;
+  const activeProjectDefaultHostConfig = useQuery(
+    "hostConfigsV2:getProjectDefault" as any,
+    activeSharedProjectId
+      ? { projectId: activeSharedProjectId as any }
+      : "skip",
+  ) as HostConfigDtoV2 | null | undefined;
+
   const serverState = useServerState({
     appState,
     dispatch,
@@ -470,6 +496,9 @@ export function useAppState({
     effectiveProjects: projectState.effectiveProjects,
     effectiveActiveProjectId: projectState.effectiveActiveProjectId,
     activeProjectServersFlat: projectState.activeProjectServersFlat,
+    activeMcpProfile:
+      activeHostConfig?.mcpProfile ?? activeProjectDefaultHostConfig?.mcpProfile,
+    activeHostConfig,
     logger,
   });
 
@@ -669,6 +698,14 @@ export function useAppState({
     projects: effectiveProjects,
     activeProjectId: effectiveActiveProjectId,
     activeProject: serverState.activeProject,
+    // Active project's persisted mcpProfile envelope. Forwarded out so the
+    // App shell can mount `ActiveMcpProfileProvider` around in-inspector
+    // chat surfaces — without this, `MCPAppsRenderer` reads `undefined`
+    // from `useActiveMcpProfile()` and never applies the project's sandbox
+    // policy. The hosted-chat path mounts its own provider in
+    // ChatboxChatPage from the redeem-response payload; this is the
+    // in-inspector counterpart.
+    activeMcpProfile: activeProjectDefaultHostConfig?.mcpProfile,
 
     handleConnect: serverState.handleConnect,
     handleDisconnect: serverState.handleDisconnect,

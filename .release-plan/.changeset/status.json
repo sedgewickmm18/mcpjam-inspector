@@ -5,21 +5,41 @@
         {
           "name": "@mcpjam/inspector",
           "type": "patch"
+        },
+        {
+          "name": "@mcpjam/sdk",
+          "type": "minor"
         }
       ],
-      "summary": "Inspector rollup since the last release:\n\n- Chatbox OAuth: attach the WorkOS bearer token on `/oauth/callback` to fix the 403 some users hit when finishing the chatbox auth flow.\n- Sidebar credit usage: clicking the progress bar now sends the user to billing.\n- Compare-plans table: removed the team seat-minimum label and finished the Projects row in the plan comparison.\n- Chatbox builder: removed the unused `allowGuestAccess` toggle.",
-      "id": "inspector-rollup-pre-soundcheck-deploy"
+      "summary": "Inspector + SDK rollup since the last release.\n\n**@mcpjam/sdk**\n\n- Consume `hostConfig.mcpProfile` end-to-end: profile-aware connection in `MCPClientManager`, new sandbox-policy types, and supporting browser/index exports (#2103).\n\n**@mcpjam/inspector**\n\n- Named hosts UI: new Hosts tab, HostPicker, host builder, and consumer seeding (#2112).\n- Host config: consume `hostConfig.mcpProfile` end-to-end across chatbox, hosted chat, and server connection paths (#2103).\n- Billing: surface pending and failed credit top-ups in the credit balance card (#2111).\n- Electron OAuth: redirect-mixing fix between dev and local (#2116), plus an Electron fallback path for the OAuth modal/sidebar/auth flow (#2096).\n- Tokenizer: stop paging Sentry for client-side fetch failures (#2109).\n- Docs: desktop download links now point at the latest release URLs (#2093).\n- Misc sidebar nit.",
+      "id": "release-rollup-2026-05-14"
     }
   ],
   "releases": [
     {
       "name": "@mcpjam/inspector",
       "type": "patch",
-      "oldVersion": "2.4.8",
+      "oldVersion": "2.4.10",
       "changesets": [
-        "inspector-rollup-pre-soundcheck-deploy"
+        "release-rollup-2026-05-14"
       ],
-      "newVersion": "2.4.9"
+      "newVersion": "2.4.11"
+    },
+    {
+      "name": "@mcpjam/sdk",
+      "type": "minor",
+      "oldVersion": "1.5.0",
+      "changesets": [
+        "release-rollup-2026-05-14"
+      ],
+      "newVersion": "1.6.0"
+    },
+    {
+      "name": "@mcpjam/mcp",
+      "type": "none",
+      "oldVersion": "0.0.1",
+      "changesets": [],
+      "newVersion": "0.0.1"
     }
   ]
 }
