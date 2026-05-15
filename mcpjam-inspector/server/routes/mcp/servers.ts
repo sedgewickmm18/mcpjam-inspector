@@ -5,6 +5,7 @@ import { isSqliteMode } from "../../db/index.js";
 import {
   listServers,
   type LocalServerConfig,
+  unregisterServer,
 } from "../../services/local-server-registry.js";
 import { logger } from "../../utils/logger";
 import {
@@ -165,6 +166,14 @@ servers.delete("/:serverId", async (c) => {
     }
 
     mcpClientManager.removeServer(serverId);
+
+    // In SQLite mode, also remove from registry and database
+    if (isSqliteMode()) {
+      const unregistered = unregisterServer(serverId);
+      if (unregistered) {
+        logger.info(`[servers] Unregistered server from SQLite registry: ${serverId}`);
+      }
+    }
 
     return c.json({
       success: true,

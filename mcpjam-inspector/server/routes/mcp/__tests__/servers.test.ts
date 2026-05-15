@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import servers from "../servers.js";
+import * as localServerRegistry from "../../../services/local-server-registry.js";
 
 // Mock rpc-log-bus module
 vi.mock("../../../services/rpc-log-bus", () => ({
@@ -8,6 +9,12 @@ vi.mock("../../../services/rpc-log-bus", () => ({
     getBuffer: vi.fn().mockReturnValue([]),
     subscribe: vi.fn().mockReturnValue(() => {}),
   },
+}));
+
+// Mock isSqliteMode
+vi.mock("../../../db/index.js", () => ({
+  isSqliteMode: vi.fn(() => false),
+  getDefaultProjectId: vi.fn(() => "default-project-id"),
 }));
 
 // Mock MCPClientManager
@@ -221,7 +228,7 @@ describe("DELETE /api/mcp/servers/:serverId", () => {
     });
 
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = await res.json() as { success: boolean; message: string };
     expect(data.success).toBe(true);
     expect(data.message).toBe("Disconnected from server: server-1");
 
@@ -237,7 +244,7 @@ describe("DELETE /api/mcp/servers/:serverId", () => {
     });
 
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = await res.json() as { success: boolean };
     expect(data.success).toBe(true);
 
     // Disconnect should not be called for already disconnected server
@@ -255,7 +262,7 @@ describe("DELETE /api/mcp/servers/:serverId", () => {
     });
 
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = await res.json() as { success: boolean };
     expect(data.success).toBe(true);
 
     // removeServer should still be called
@@ -356,7 +363,7 @@ describe("POST /api/mcp/servers/reconnect", () => {
 
       expect(res.status).toBe(400);
       const data = (await res.json()) as { error?: string };
-      expect(data.error).toBe("projectId is required");
+      expect(data.error).toContain("serverName is required with projectId");
       // Legacy {serverConfig} body must NOT reach the manager.
       expect(mcpClientManager.connectToServer).not.toHaveBeenCalled();
     });

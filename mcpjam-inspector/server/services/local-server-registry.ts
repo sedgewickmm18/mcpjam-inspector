@@ -242,6 +242,36 @@ export function removeServer(serverId: string): boolean {
 }
 
 /**
+ * Delete a server from SQLite database.
+ */
+export function deleteServerFromSQLite(serverId: string): boolean {
+  const db = getDb();
+  const result = db.prepare(`DELETE FROM servers WHERE id = ?`).run(serverId);
+  const deleted = result.changes > 0;
+  if (deleted) {
+    logger.info(`[local-registry] Deleted server from SQLite: ${serverId}`);
+  }
+  return deleted;
+}
+
+/**
+ * Unregister a server completely from both registry and SQLite database.
+ * This is the comprehensive removal function that should be used when
+ * a server is deleted from the UI.
+ */
+export function unregisterServer(serverId: string): boolean {
+  const removedFromRegistry = removeServer(serverId);
+  const deletedFromSQLite = deleteServerFromSQLite(serverId);
+  
+  if (removedFromRegistry || deletedFromSQLite) {
+    logger.info(`[local-registry] Unregistered server: ${serverId} (registry: ${removedFromRegistry}, sqlite: ${deletedFromSQLite})`);
+    return true;
+  }
+  
+  return false;
+}
+
+/**
  * Check if a server is known.
  */
 export function hasServer(serverId: string): boolean {
