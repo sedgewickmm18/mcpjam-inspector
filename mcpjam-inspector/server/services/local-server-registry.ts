@@ -9,6 +9,8 @@
  */
 
 import { logger } from "../utils/logger";
+import type { Database } from "better-sqlite3";
+import { getDb } from "../db/connection";
 
 export interface LocalServerConfig {
   serverId: string;
@@ -96,6 +98,8 @@ export function initFromCLIConfig(config: {
 
     registry.set(server.name, entry);
     logger.info(`[local-registry] Registered CLI server: ${server.name} (${transportType})`);
+    // Also save to SQLite
+    saveServerToSQLite(entry);
   }
 
   logger.info(`[local-registry] Initialized with ${registry.size} server(s)`);
@@ -107,6 +111,8 @@ export function initFromCLIConfig(config: {
 export function registerServer(config: LocalServerConfig): void {
   registry.set(config.serverId, config);
   logger.info(`[local-registry] Registered server: ${config.serverId} (${config.transportType})`);
+  // Save to SQLite
+  saveServerToSQLite(config);
 }
 
 /**
@@ -123,6 +129,105 @@ export function getServerConfig(
  */
 export function listServers(): LocalServerConfig[] {
   return Array.from(registry.values());
+}
+
+/**
+ * Load servers from SQLite database.
+ * Reads all rows from the servers table and populates the registry.
+ */
+export function loadServersFromSQLite(): void {
+  const db = getDb();
+  // Type-safe query result - cast to typed array
+  const rows = db.prepare(`SELECT * FROM servers`).all() as Array<{
+    id: string;
+    name: string;
+    transport_type: "stdio" | "http";
+    config: string;
+  }>;
+  for (const row of rows) {
+    try {
+      // Parse JSON config
+      const configJson = JSON.parse(row.config) as {
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+        url?: string;
+        headers?: Record<string, string>;
+        useOAuth?: boolean;
+        timeout?: number;
+      };
+      const config: LocalServerConfig = {
+        serverId: row.id,
+        name: row.name,
+        transportType: row.transport_type,
+        ...(row.transport_type === "stdio" ? {
+          command: configJson.command,
+          args: configJson.args,
+          env: configJson.env,
+        } : {}),
+        ...(row.transport_type === "http" ? {
+          url: configJson.url,
+          headers: configJson.headers,
+          useOAuth: configJson.useOAuth,
+        } : {}),
+        timeout: configJson.timeout,
+      };
+      registry.set(row.id, config);
+      logger.info(`[local-registry] Loaded server from SQLite: ${row.id}`);
+    } catch (e) {
+      logger.error(`Failed to load server from SQLite: ${row.id}`, e);
+    }
+  }
+}
+
+/**
+ * Save a server configuration to SQLite database.
+ * Inserts a new row or updates an existing one.
+ */
+export function saveServerToSQLite(config: LocalServerConfig): void {
+  const db = getDb();
+  const existing = db.prepare(`SELECT 1 FROM servers WHERE id = ?`).get(config.serverId);
+
+  const serverData = {
+    id: config.serverId,
+    name: config.name,
+    transport_type: config.transportType,
+    config: {
+      ...(config.transportType === "stdio" ? {
+        command: config.command,
+        args: config.args,
+        env: config.env,
+      } : {}),
+      ...(config.transportType === "http" ? {
+        url: config.url,
+        headers: config.headers,
+        useOAuth: config.useOAuth,
+      } : {}),
+      timeout: config.timeout,
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing) {
+    const sql = `UPDATE servers SET name = ?, transport_type = ?, config = ?, updated_at = ? WHERE id = ?`;
+    db.prepare(sql).run(
+      serverData.name,
+      serverData.transport_type,
+      JSON.stringify(serverData.config),
+      serverData.updated_at,
+      serverData.id
+    );
+  } else {
+    const sql = `INSERT INTO servers (id, name, transport_type, config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`;
+    db.prepare(sql).run(
+      serverData.id,
+      serverData.name,
+      serverData.transport_type,
+      JSON.stringify(serverData.config),
+      serverData.updated_at,
+      serverData.updated_at
+    );
+  }
 }
 
 /**

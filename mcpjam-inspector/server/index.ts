@@ -114,6 +114,7 @@ import { initXAAIdpKeyPair } from "./services/xaa-idp-keypair";
 import { ensureDefaultProject } from "./db/project-init";
 import { initializeSqlite, shutdownSqlite, isSqliteMode } from "./db";
 import { initFromCLIConfig } from "./services/local-server-registry";
+import { loadServersFromSQLite } from "./services/local-server-registry";
 
 // Utility function to extract MCP server config from environment variables
 function getMCPConfigFromEnv() {
@@ -218,6 +219,9 @@ initXAAIdpKeyPair();
 if (initializeSqlite()) {
   await ensureDefaultProject();
 
+  // Load servers from SQLite first
+  loadServersFromSQLite();
+
   // Populate the local server registry from CLI config
   const mcpConfig = getMCPConfigFromEnv();
   if (mcpConfig && mcpConfig.servers && mcpConfig.servers.length > 0) {
@@ -283,7 +287,7 @@ app.use("*", originValidationMiddleware);
 // 3. Hosted mode partition blocks legacy API families (health endpoints exempt).
 if (HOSTED_MODE) {
   app.use("/api/session-token", (c) =>
-    strictModeResponse(c, "/api/session-token"),
+    strictModeResponse(c, "/api/session-token")
   );
   app.use("/api/mcp", (c, next) => {
     if (c.req.path === "/api/mcp/health") return next();

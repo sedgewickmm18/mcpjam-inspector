@@ -159,9 +159,10 @@ function buildResolverBody(
     projectId: string;
     serverName?: string;
     connectionDefaults?: ConnectionDefaults;
+    serverConfig?: MCPServerConfig;
   },
 ): Record<string, unknown> {
-  return {
+  const body: Record<string, unknown> = {
     projectId: options.projectId,
     serverId,
     ...(options.serverName ? { serverName: options.serverName } : {}),
@@ -169,6 +170,31 @@ function buildResolverBody(
       ? { connectionDefaults: options.connectionDefaults }
       : {}),
   };
+
+  // In local mode, include full server config for auto-registration
+  if (!HOSTED_MODE && options.serverConfig) {
+    const config = options.serverConfig as any;
+    if (config.url) {
+      body.url = typeof config.url === "string" ? config.url : config.url.toString();
+    }
+    if (config.command) {
+      body.command = config.command;
+    }
+    if (config.args) {
+      body.args = config.args;
+    }
+    if (config.env) {
+      body.env = config.env;
+    }
+    if (config.requestInit?.headers) {
+      // Headers are already included via connectionDefaults, but also pass explicitly
+      if (!options.connectionDefaults?.headers) {
+        body.headers = config.requestInit.headers;
+      }
+    }
+  }
+
+  return body;
 }
 
 export async function testConnection(
@@ -198,6 +224,7 @@ export async function testConnection(
     projectId: options.projectId,
     serverName: options.serverName,
     connectionDefaults: options.connectionDefaults,
+    serverConfig,
   });
 
   const res = await authFetchWithTimeout(
@@ -263,6 +290,7 @@ export async function reconnectServer(
     projectId: options.projectId,
     serverName: options.serverName,
     connectionDefaults: options.connectionDefaults,
+    serverConfig,
   });
 
   const res = await authFetchWithTimeout(

@@ -3,7 +3,8 @@ import "../../types/hono"; // Type extensions
 import { rpcLogBus, type RpcLogEvent } from "../../services/rpc-log-bus";
 import { isSqliteMode } from "../../db/index.js";
 import {
-  listServers as listKnownServers,
+  listServers,
+  type LocalServerConfig,
 } from "../../services/local-server-registry.js";
 import { logger } from "../../utils/logger";
 import {
@@ -14,11 +15,13 @@ import {
 
 const servers = new Hono();
 
-// List all connected servers with their status
+// List all servers (connected in manager + all known in registry)
 servers.get("/", async (c) => {
   try {
     const mcpClientManager = c.mcpClientManager;
-    const serverList = mcpClientManager
+
+    // Get servers currently connected in the manager
+    const connectedServers = mcpClientManager
       .getServerSummaries()
       .map(({ id, status, config }) => ({
         id,
@@ -26,6 +29,40 @@ servers.get("/", async (c) => {
         status,
         config,
       }));
+
+    // In local mode, also include all servers from the registry
+    let serverList = connectedServers;
+    if (isSqliteMode()) {
+      const registryServers = listServers();
+
+      // Add registry servers that aren't connected yet (disconnected after restart)
+      const knownServerIds = new Set(connectedServers.map(s => s.id));
+
+      const disconnectedServers = registryServers
+        .filter(server => !knownServerIds.has(server.serverId))
+        .map(server => {
+          // Convert LocalServerConfig to MCPClientManager format
+          const managerConfig: any = server.transportType === "stdio"
+            ? {
+                command: server.command,
+                args: server.args || [],
+                env: server.env || {},
+              }
+            : {
+                url: server.url,
+                requestInit: server.headers ? { headers: server.headers } : undefined,
+              };
+
+          return {
+            id: server.serverId,
+            name: server.name,
+            status: "disconnected" as const,
+            config: managerConfig,
+          };
+        });
+
+      serverList = [...connectedServers, ...disconnectedServers];
+    }
 
     return c.json({
       success: true,
@@ -155,11 +192,11 @@ servers.get("/known", async (c) => {
       400,
     );
   }
-  const knownServers = listKnownServers();
+  const knownServers = listServers();
   return c.json({ success: true, servers: knownServers });
 });
 
-// Reconnect to a server. Body shape: {projectId, serverId, serverName}; the
+// Reconnect to a server. Body shape: {projectId, serverId, serverName};
 // local Hono server resolves the config (and any OAuth tokens) from Convex
 // via /web/authorize-batch-local.
 servers.post("/reconnect", async (c) => {
@@ -247,7 +284,7 @@ servers.get("/rpc/stream", async (c) => {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+      "Connection": "keep-alive",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Expose-Headers": "*",
     },

@@ -5,6 +5,7 @@ import { isSqliteMode } from "../db/index.js";
 import {
   getServerConfig,
   configToAuthFormat,
+  registerServer,
 } from "../services/local-server-registry.js";
 import {
   ErrorCode,
@@ -89,11 +90,50 @@ export function readLocalApiBearer(c: Context): string | null {
  * auth restrictions beyond the session token gating localhost access.
  */
 function authorizeBatchLocalFromRegistry(
-  serverIds: string[]
+  serverIds: string[],
+  connectParams?: LocalConnectRequestParams
 ): LocalAuthorizeBatchResponse {
   const results: Record<string, LocalAuthorizeBatchResult> = {};
   for (const serverId of serverIds) {
-    const config = getServerConfig(serverId);
+    let config = getServerConfig(serverId);
+    if (!config && connectParams) {
+      // Try to auto-register the server from connection params
+      const { url, useOAuth, command, args, env, defaults } = connectParams;
+      const transportType = url ? ("http" as const) : ("stdio" as const);
+
+      if (transportType === "http") {
+        if (url) {
+          config = {
+            serverId,
+            name: connectParams.serverDisplayName || serverId,
+            transportType,
+            url,
+            headers: defaults?.headers || {},
+            useOAuth: useOAuth ?? false,
+            timeout: defaults?.timeoutMs,
+          };
+        }
+      } else {
+        // STDIO server: need at least a command
+        if (command) {
+          config = {
+            serverId,
+            name: connectParams.serverDisplayName || serverId,
+            transportType,
+            command,
+            args: args || [],
+            env: env || {},
+            timeout: defaults?.timeoutMs,
+          };
+        }
+      }
+      if (config) {
+        registerServer(config);
+        logger.info(
+          `[local-registry] Auto-registered server: ${serverId} (${transportType})`
+        );
+      }
+    }
     if (!config) {
       results[serverId] = {
         ok: false,
@@ -124,11 +164,12 @@ export async function authorizeBatchLocal(
   c: Context,
   bearerToken: string,
   projectId: string,
-  serverIds: string[]
+  serverIds: string[],
+  connectParams?: LocalConnectRequestParams
 ): Promise<LocalAuthorizeBatchResponse> {
   // SQLite mode: skip Convex entirely, use local server registry
   if (isSqliteMode()) {
-    return authorizeBatchLocalFromRegistry(serverIds);
+    return authorizeBatchLocalFromRegistry(serverIds, connectParams);
   }
 
   const convexUrl = process.env.CONVEX_HTTP_URL;
@@ -242,11 +283,12 @@ export async function authorizeServerLocal(
   c: Context,
   bearerToken: string,
   projectId: string,
-  serverId: string
+  serverId: string,
+  connectParams?: LocalConnectRequestParams
 ): Promise<LocalAuthorizeBatchSuccess> {
   const batch = await authorizeBatchLocal(c, bearerToken, projectId, [
     serverId,
-  ]);
+  ], connectParams);
   const result = batch.results[serverId];
   if (!result) {
     throw new WebRouteError(
@@ -436,9 +478,10 @@ export async function resolveLocalServerForConnect(
      * resolver path.
      */
     defaults?: ConnectionDefaults;
+    connectParams?: LocalConnectRequestParams;
   }
 ): Promise<{ config: MCPServerConfig; authorizeResult: LocalAuthorizeBatchSuccess }> {
-  const result = await authorizeServerLocal(c, bearerToken, projectId, serverId);
+  const result = await authorizeServerLocal(c, bearerToken, projectId, serverId, options?.connectParams);
 
   const useOAuth =
     result.serverConfig.transportType === "http" &&
@@ -499,6 +542,12 @@ export interface LocalConnectRequestParams {
   bearer: string;
   clientCapabilities?: Record<string, unknown>;
   defaults?: ConnectionDefaults;
+  // Additional fields for auto-registration of new servers
+  url?: string;
+  useOAuth?: boolean;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
 }
 
 /**
@@ -593,6 +642,16 @@ export function parseLocalConnectRequestBody(
       ? (raw.clientCapabilities as Record<string, unknown>)
       : undefined;
 
+  // Extract additional server configuration fields for auto-registration
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  const useOAuth = typeof raw.useOAuth === "boolean" ? raw.useOAuth : undefined;
+  const command = typeof raw.command === "string" ? raw.command.trim() : "";
+  const args = Array.isArray(raw.args) ? raw.args : undefined;
+  const env =
+    typeof raw.env === "object" && raw.env !== null
+      ? (raw.env as Record<string, string>)
+      : undefined;
+
   return {
     ok: true,
     params: {
@@ -602,6 +661,11 @@ export function parseLocalConnectRequestBody(
       bearer: bearer ?? "",
       clientCapabilities,
       defaults: parseConnectionDefaults(raw.connectionDefaults),
+      url,
+      useOAuth,
+      command,
+      args,
+      env,
     },
   };
 }
@@ -684,6 +748,7 @@ export async function executeLocalServerConnect(
         serverDisplayName,
         clientCapabilities: params.clientCapabilities,
         defaults: params.defaults,
+        connectParams: params,
       },
     );
   } catch (error) {
